@@ -20,6 +20,26 @@ Companion → account command channel carries `{JSON = <encoded object>}`:
 - `GO_OFFLINE` (account → companion) when unbound / logged out.
 - Account pushes state to companion via `updateThermostat` `{JSON=...}`.
 
+## Pluggable backends (`nuheat.client`)
+
+The account/companion drivers talk to NuHeat only through the `NuHeatClient` contract
+(`src/nuheat/client/init.lua`); a factory selects one of two interchangeable backends,
+both of which own their own auth/session and speak the same canonical thermostat object
+shape (the legacy shape documented below), so the drivers are backend-agnostic.
+
+- **`nuheat.client.legacy`** — the undocumented `www.mynuheat.com` app API below.
+  Email/password session; thermostat + schedule ride in one object. Fully functional;
+  used to verify all features today. Selected by `constants.API_MODE = "legacy"`.
+- **`nuheat.client.oauth`** — the documented OpenAPI at `api.mynuheat.com` (OAuth2/OpenID
+  via `identity.mynuheat.com`, dedicated `Thermostat`/`Schedule`/`Group`/`EnergyLog`
+  endpoints). Drop-in replacement that translates the OpenAPI models to/from the canonical
+  shape. Skeleton pending a ClientID from NuHeat; two `TODO(oauth)` items (grant type,
+  ThermostatModel field names/units) must be confirmed against a live account.
+
+Contract: `authenticate` · `isAuthenticated` · `logout` · `getThermostats` ·
+`getThermostat` · `setThermostat` · `getSchedule` · `setSchedule` · `getNotification`
+(legacy long-polls; oauth polls on an interval).
+
 ## REST API — `https://www.mynuheat.com` (port 443)
 
 Headers: `Content-Type: application/json; charset=utf-8`, `Connection: close`.

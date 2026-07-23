@@ -1,6 +1,12 @@
 --- Driver-wide constants for control4-nuheat.
 local M = {}
 
+--- Which NuHeat backend the account driver uses (see nuheat.client). "legacy"
+--- is the mynuheat.com app API, fully working today. "oauth" is the official
+--- api.mynuheat.com OpenAPI, enabled once a ClientID is issued. Kept a constant
+--- for now; promote to a Composer property when the oauth backend goes live.
+M.API_MODE = "legacy"
+
 --- C4:SetPropertyAttribs values used by lib.values / lib.utils for runtime
 --- property visibility.
 M.SHOW_PROPERTY = 0

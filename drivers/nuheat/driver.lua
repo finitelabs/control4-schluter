@@ -26,19 +26,19 @@ local githubUpdater = require("lib.github-updater")
 --#endif
 local JSON = require("JSON")
 
-local NuHeatClient = require("nuheat.client")
+local clientFactory = require("nuheat.client")
 local constants = require("constants")
 
 local NS = constants.BINDING_NAMESPACE
 local CMD = constants.CMD
 
-local client = NuHeatClient:new()
+-- The backend (legacy mynuheat.com or official OAuth) owns its own session; the
+-- driver is backend-agnostic and only speaks the NuHeatClient contract.
+local client = clientFactory.create(constants.API_MODE)
 
 --- Runtime state (not persisted; rebuilt on login).
 local gState = {
-  --- @type string|nil
-  sessionId = nil,
-  --- @type number
+  --- @type number Notification cursor (legacy long-poll; ignored by oauth).
   sequenceNr = 0,
   --- @type table<string, table> serial number -> latest NuHeat thermostat object
   devices = {},
@@ -135,11 +135,10 @@ end
 
 --- Fetch the full thermostat list for the account and ingest each.
 local function refreshThermostats()
-  if not gState.sessionId then
+  if not client:isAuthenticated() then
     return
   end
-  client:getThermostats(gState.sessionId):next(function(result)
-    local list = result.Thermostats or result
+  client:getThermostats():next(function(list)
     if type(list) ~= "table" then
       return
     end
@@ -157,10 +156,10 @@ end
 local armNotifications
 
 armNotifications = function()
-  if not gState.sessionId then
+  if not client:isAuthenticated() then
     return
   end
-  client:getNotification(gState.sessionId, gState.sequenceNr):next(function(obj)
+  client:getNotification(gState.sequenceNr):next(function(obj)
     if obj and obj.SequenceNr then
       gState.sequenceNr = tonumber(obj.SequenceNr) + 1
     end
@@ -183,14 +182,13 @@ local function login()
     return
   end
   C4:UpdateProperty("Login Status", "Logging in...")
-  client:authenticate(email, password):next(function(sessionId)
-    gState.sessionId = sessionId
+  client:authenticate(email, password):next(function()
     gState.sequenceNr = 0
     C4:UpdateProperty("Login Status", "Logged In")
     refreshThermostats()
     armNotifications()
   end, function(err)
-    gState.sessionId = nil
+    client:logout()
     C4:UpdateProperty("Login Status", err.message or "Login failed")
     log:warn("login failed: %s", err.message)
   end)
@@ -293,15 +291,15 @@ end
 function RFP.setThermostat(idBinding, strCommand, tParams)
   log:trace("RFP.setThermostat(%s)", idBinding)
   local serial = serialForBinding(idBinding)
-  if not serial or not gState.sessionId then
+  if not serial or not client:isAuthenticated() then
     return
   end
   local ok, settings = pcall(JSON.decode, JSON, (tParams or {}).JSON or "")
   if not ok or type(settings) ~= "table" then
     return
   end
-  client:setThermostat(gState.sessionId, serial, settings):next(function(updated)
-    gState.devices[serial] = updated.Thermostat or updated
+  client:setThermostat(serial, settings):next(function(updated)
+    gState.devices[serial] = updated
     handoff(serial)
   end, function(err)
     log:warn("setThermostat failed for %s: %s", serial, err)
@@ -320,6 +318,7 @@ function EC.Reset_Driver(tParams)
   if (tParams or {})["Are You Sure?"] == "Yes" then
     bindings:deleteAllBindings(NS)
     gState.devices = {}
+    client:logout()
     C4:UpdateProperty("Login Status", "")
     login()
   end
