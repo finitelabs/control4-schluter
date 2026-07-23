@@ -148,8 +148,10 @@ local function refreshThermostats()
     for _, device in ipairs(list) do
       ingestThermostat(device)
     end
+    C4:UpdateProperty("Driver Status", string.format("Connected (%d thermostat%s)", #list, #list == 1 and "" or "s"))
   end, function(err)
     log:warn("refreshThermostats failed: %s", err)
+    C4:UpdateProperty("Driver Status", "Error retrieving thermostats")
   end)
 end
 
@@ -182,9 +184,11 @@ local function login()
   local password = Properties["Password"]
   if not email or email == "" or not password or password == "" then
     C4:UpdateProperty("Login Status", "Enter email and password")
+    C4:UpdateProperty("Driver Status", "Awaiting credentials")
     return
   end
   C4:UpdateProperty("Login Status", "Logging in...")
+  C4:UpdateProperty("Driver Status", "Connecting")
   client:authenticate(email, password):next(function()
     gState.sequenceNr = 0
     C4:UpdateProperty("Login Status", "Logged In")
@@ -193,6 +197,7 @@ local function login()
   end, function(err)
     client:logout()
     C4:UpdateProperty("Login Status", err.message or "Login failed")
+    C4:UpdateProperty("Driver Status", "Not connected")
     log:warn("login failed: %s", err.message)
   end)
 end
@@ -233,6 +238,7 @@ function OnDriverLateInit()
   log:trace("OnDriverLateInit()")
   bindings:restoreBindings()
   C4:UpdateProperty("Driver Version", C4:GetDriverConfigInfo("version"))
+  C4:UpdateProperty("Driver Status", "Initializing")
   login()
   --#ifndef DRIVERCENTRAL
   -- Auto-update: only the leader account instance checks, at most every 30 min,

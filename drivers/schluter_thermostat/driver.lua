@@ -86,6 +86,7 @@ local function pushState()
   if not gState then
     return
   end
+  C4:UpdateProperty("Driver Status", gState.online and "Online" or "Offline")
   SendToProxy(PROXY_BINDING, "ONLINE_CHANGED", { STATE = gState.online }, "NOTIFY")
   SendToProxy(PROXY_BINDING, "TEMPERATURE_CHANGED", {
     TEMPERATURE = tostring(gState.temperatureC),
@@ -292,6 +293,7 @@ function RFP.goOffline(idBinding, strCommand)
   log:trace("RFP.goOffline(%s)", idBinding)
   SendToProxy(PROXY_BINDING, "ONLINE_CHANGED", { STATE = false }, "NOTIFY")
   C4:UpdateProperty("Serial ID", "")
+  C4:UpdateProperty("Driver Status", "Offline")
   gDevice, gState, gScheduleJson = nil, nil, nil
 end
 
@@ -325,5 +327,6 @@ end
 function OnDriverLateInit()
   log:trace("OnDriverLateInit()")
   C4:UpdateProperty("Driver Version", C4:GetDriverConfigInfo("version"))
+  C4:UpdateProperty("Driver Status", "Waiting for thermostat")
   SendToProxy(PROXY_BINDING, "ONLINE_CHANGED", { STATE = false }, "NOTIFY")
 end
