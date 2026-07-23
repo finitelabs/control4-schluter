@@ -123,6 +123,15 @@
     <has_extras>False</has_extras>
     <has_vacation_mode>False</has_vacation_mode>
     <has_remote_sensor>False</has_remote_sensor>
+    <scheduling>True</scheduling>
+    <schedule_default>
+      <schedule_day_info Entries="4" DefaultHeat="270" DefaultCool="50">
+        <schedule_entry Name="Wake" Time="360" Enabled="True" Heat="310" Cool="0" />
+        <schedule_entry Name="Leave" Time="540" Enabled="True" Heat="235" Cool="0" />
+        <schedule_entry Name="Return" Time="1020" Enabled="True" Heat="310" Cool="0" />
+        <schedule_entry Name="Sleep" Time="1380" Enabled="True" Heat="235" Cool="0" />
+      </schedule_day_info>
+    </schedule_default>
     <fan_modes/>
     <hvac_modes>Off,Heat</hvac_modes>
     <hold_modes>Off,2 Hours,Hold Until,Permanent</hold_modes>

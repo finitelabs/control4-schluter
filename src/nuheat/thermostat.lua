@@ -167,4 +167,104 @@ function M.applyHvacMode(settings, mode, minTempNuheat)
   return settings
 end
 
+-- ─── Schedule model (Control4 thermostatV2 ⇄ NuHeat Schedules[]) ────────────
+--
+-- NuHeat `device.Schedules` is a 7-element array indexed by NuHeat day
+-- (1=Mon .. 7=Sun). Each entry = `{ WeekDayGrpNo, Events[1..4] }`, each event =
+-- `{ Clock "HH:MM:SS", ScheduleType, TempFloor (°C×100), Active }`. Days sharing
+-- a `WeekDayGrpNo` share one program, so editing one propagates to the whole
+-- group — matching the NuHeat thermostat's own grouping behavior (and the old
+-- driver). Control4's thermostatV2 schedule is per-day (DayIndex 0=Sun .. 6=Sat)
+-- with EntryIndex 0..3 (Wake/Leave/Return/Sleep). Heat-only, so cool is unused.
+
+--- NuHeat schedule array index (1=Mon..7=Sun) -> C4 DayIndex (0=Sun..6=Sat).
+M.NUHEAT_TO_C4_DAY = { 1, 2, 3, 4, 5, 6, 0 }
+--- C4 DayIndex (0=Sun..6=Sat) -> NuHeat schedule array index (1=Mon..7=Sun).
+M.C4_TO_NUHEAT_DAY = { [0] = 7, [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 5, [6] = 6 }
+--- Events per day in the NuHeat Signature schedule.
+M.SCHEDULE_ENTRIES_PER_DAY = 4
+
+--- Parse "HH:MM:SS" (or "HH:MM") into minutes since midnight.
+--- @param clock string
+--- @return integer minutes
+function M.clockToMinutes(clock)
+  local h, m = tostring(clock):match("(%d+):(%d+)")
+  if not h then
+    return 0
+  end
+  return tonumber(h) * 60 + tonumber(m)
+end
+
+--- Format minutes since midnight as "HH:MM:SS".
+--- @param minutes number
+--- @return string
+function M.minutesToClock(minutes)
+  local mins = math.floor(tonumber(minutes) or 0)
+  local h = math.floor(mins / 60) % 24
+  return string.format("%02d:%02d:00", h, mins % 60)
+end
+
+--- Flatten a device's Schedules[] into per-(day, entry) rows for the C4 proxy.
+--- @param device table NuHeat thermostat object
+--- @return table[] rows Each `{ c4Day, entryIndex, minutes, active, tempC }`.
+function M.scheduleEntries(device)
+  local rows = {}
+  local schedules = (device or {}).Schedules
+  if type(schedules) ~= "table" then
+    return rows
+  end
+  for nuheatDay, schedule in ipairs(schedules) do
+    local c4Day = M.NUHEAT_TO_C4_DAY[nuheatDay]
+    if c4Day ~= nil and type(schedule.Events) == "table" then
+      for entryIndex, event in ipairs(schedule.Events) do
+        rows[#rows + 1] = {
+          c4Day = c4Day,
+          entryIndex = entryIndex - 1,
+          minutes = M.clockToMinutes(event.Clock),
+          active = event.Active == true,
+          tempC = M.nuheatToC(event.TempFloor),
+        }
+      end
+    end
+  end
+  return rows
+end
+
+--- Apply one Control4 schedule-entry edit to the device, propagating to every day
+--- sharing the edited day's WeekDayGrpNo. Mutates `device.Schedules` in place and
+--- preserves each event's existing ScheduleType.
+--- @param device table
+--- @param c4Day integer 0=Sun..6=Sat
+--- @param entryIndex integer 0..3
+--- @param minutes number time since midnight
+--- @param active boolean
+--- @param tempC number heat setpoint, °C
+--- @return integer[] affectedC4Days C4 day indices that changed (for notifications)
+function M.applyScheduleEntry(device, c4Day, entryIndex, minutes, active, tempC)
+  local affected = {}
+  local schedules = (device or {}).Schedules
+  local nuheatDay = M.C4_TO_NUHEAT_DAY[c4Day]
+  if type(schedules) ~= "table" or not nuheatDay or not schedules[nuheatDay] then
+    return affected
+  end
+  local group = schedules[nuheatDay].WeekDayGrpNo
+  local clock = M.minutesToClock(minutes)
+  local tempFloor = M.cToNuheat(tempC)
+  for day, schedule in ipairs(schedules) do
+    if schedule.WeekDayGrpNo == group and type(schedule.Events) == "table" then
+      local event = schedule.Events[entryIndex + 1]
+      if event then
+        event.Clock = clock
+        event.TempFloor = tempFloor
+        event.Active = active == true
+        local mapped = M.NUHEAT_TO_C4_DAY[day]
+        if mapped ~= nil then
+          affected[#affected + 1] = mapped
+        end
+      end
+    end
+  end
+  return affected
+end
+
 return M

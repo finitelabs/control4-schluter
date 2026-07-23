@@ -110,6 +110,91 @@ local function pushToAccount()
   end
 end
 
+-- ─── Schedule (thermostatV2 schedule proxy ⇄ NuHeat Schedules[]) ────────────
+
+--- Notify the proxy of one schedule entry (values in Celsius; heat-only).
+--- @param row table { c4Day, entryIndex, minutes, active, tempC }
+local function pushScheduleEntry(row)
+  SendToProxy(PROXY_BINDING, "SCHEDULE_ENTRY_CHANGED", {
+    DayIndex = tostring(row.c4Day),
+    EntryIndex = tostring(row.entryIndex),
+    TimeMinutes = tostring(row.minutes),
+    EnabledFlag = row.active and "true" or "false",
+    HeatSetpoint = tostring(model.round(row.tempC, 1)),
+    CoolSetpoint = "0",
+    Units = "C",
+  }, "NOTIFY")
+end
+
+--- Serialization of the last schedule pushed to the proxy, so unchanged handoffs
+--- (which arrive on every notification poll) don't re-emit all 28 entries.
+local gScheduleJson = nil
+
+--- Push the whole schedule to the proxy (on handoff / state update), but only
+--- when it differs from the last one pushed.
+local function pushSchedule()
+  if not gDevice or type(gDevice.Schedules) ~= "table" then
+    return
+  end
+  local json = JSON:encode(gDevice.Schedules)
+  if json == gScheduleJson then
+    return
+  end
+  gScheduleJson = json
+  for _, row in ipairs(model.scheduleEntries(gDevice)) do
+    pushScheduleEntry(row)
+  end
+end
+
+--- Convert a heat setpoint in the entry's scale to °C.
+--- @param value any
+--- @param scale any "C"/"F" (defaults to F)
+--- @return number|nil
+local function heatSetpointToC(value, scale)
+  local n = tonumber(value)
+  if n == nil then
+    return nil
+  end
+  if tostring(scale or "F"):upper():sub(1, 1) == "C" then
+    return n
+  end
+  return model.fToC(n)
+end
+
+--- Parse a SCHEDULE_ENTRY command into edit rows. The thermostatV2 proxy sends
+--- either flat params (DAY_INDEX/ENTRY_INDEX/...) or an ENTRIES XML blob of
+--- <ScheduleEntryUpdate .../> elements; support both.
+--- @param tParams table
+--- @return table[] edits Each `{ day, entry, minutes, enabled, tempC }`.
+local function parseScheduleEntries(tParams)
+  tParams = tParams or {}
+  local edits = {}
+  local entriesXml = tParams.ENTRIES
+  if type(entriesXml) == "string" and entriesXml ~= "" then
+    for attrs in entriesXml:gmatch("<ScheduleEntryUpdate(.-)/?>") do
+      local function attr(name)
+        return attrs:match(name .. '%s*=%s*"([^"]*)"')
+      end
+      edits[#edits + 1] = {
+        day = tonumber(attr("DayOfWeek")),
+        entry = tonumber(attr("EntryIndex")),
+        minutes = tonumber(attr("EntryTime")),
+        enabled = tostring(attr("IsEnabled")):lower() == "true",
+        tempC = heatSetpointToC(attr("HeatSetpoint"), attr("Scale") or tParams.SCALE),
+      }
+    end
+  elseif tParams.DAY_INDEX ~= nil then
+    edits[#edits + 1] = {
+      day = tonumber(tParams.DAY_INDEX),
+      entry = tonumber(tParams.ENTRY_INDEX),
+      minutes = tonumber(tParams.ENTRY_TIME),
+      enabled = toboolean(tParams.ENABLED),
+      tempC = heatSetpointToC(tParams.HEAT_SETPOINT, tParams.SCALE),
+    }
+  end
+  return edits
+end
+
 -- ─── Proxy command handlers (thermostatV2 → NuHeat) ────────────────────────
 
 local function applyAndSend(idBinding, mutate)
@@ -156,6 +241,35 @@ function RFP.SET_MODE_OFF(idBinding)
   end)
 end
 
+--- Edit one or more schedule entries. Applies each to the device (propagating
+--- across the NuHeat day-group), notifies the proxy of every affected day, and
+--- writes the mutated schedule back through the account.
+function RFP.SCHEDULE_ENTRY(idBinding, strCommand, tParams)
+  log:trace("RFP.SCHEDULE_ENTRY(%s)", idBinding)
+  if idBinding ~= PROXY_BINDING or not gDevice then
+    return
+  end
+  local changed = false
+  for _, e in ipairs(parseScheduleEntries(tParams)) do
+    if e.day ~= nil and e.entry ~= nil and e.tempC ~= nil then
+      local affected = model.applyScheduleEntry(gDevice, e.day, e.entry, e.minutes or 0, e.enabled, e.tempC)
+      for _, c4Day in ipairs(affected) do
+        pushScheduleEntry({
+          c4Day = c4Day,
+          entryIndex = e.entry,
+          minutes = e.minutes or 0,
+          active = e.enabled,
+          tempC = e.tempC,
+        })
+        changed = true
+      end
+    end
+  end
+  if changed then
+    pushToAccount()
+  end
+end
+
 -- ─── Account handoff handlers (account → this companion) ────────────────────
 
 --- The account hands over the current NuHeat thermostat object.
@@ -170,6 +284,7 @@ function RFP.updateThermostat(idBinding, strCommand, tParams)
   C4:UpdateProperty("Serial ID", gState.serialNumber)
   pushCapabilities()
   pushState()
+  pushSchedule()
 end
 
 --- The thermostat is gone / account logged out.
@@ -177,7 +292,7 @@ function RFP.goOffline(idBinding, strCommand)
   log:trace("RFP.goOffline(%s)", idBinding)
   SendToProxy(PROXY_BINDING, "ONLINE_CHANGED", { STATE = false }, "NOTIFY")
   C4:UpdateProperty("Serial ID", "")
-  gDevice, gState = nil, nil
+  gDevice, gState, gScheduleJson = nil, nil, nil
 end
 
 -- ─── Property + lifecycle ──────────────────────────────────────────────────
