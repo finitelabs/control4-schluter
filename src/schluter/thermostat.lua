@@ -16,6 +16,10 @@ M.MODE = { AUTO = 1, UNTIL = 2, PERMANENT = 3 }
 M.OFF_SENTINEL = 500
 --- Setpoint bounds (Schluter DITRA-HEAT): 5–70 °C / 41–158 °F.
 M.MIN_C, M.MAX_C = 5, 70
+--- Setpoints that differ by less than this (°C) are treated as unchanged when
+--- writing a schedule entry back, so °F↔°C display rounding can't drift the
+--- device's stored value. Below a 1 °F (≈0.56 °C) and a 0.5 °C step.
+M.SETPOINT_EPSILON_C = 0.28
 
 -- ─── Temperature conversion ────────────────────────────────────────────────
 
@@ -284,7 +288,16 @@ function M.applyScheduleEntry(device, c4Day, entryIndex, minutes, active, tempC)
       local event = schedule.Events[entryIndex + 1]
       if event then
         event.Clock = clock
-        event.TempFloor = tempFloor
+        -- Only rewrite the setpoint when it actually changed in the display
+        -- scale. The proxy reports setpoints as integer °F (or 0.5 °C), which do
+        -- not line up with the device's exact stored °C, so re-saving an
+        -- unchanged entry would otherwise drift TempFloor by the rounding error
+        -- (e.g. 31.05 → 31.15 °C) and no longer match the Schluter app. The
+        -- epsilon is below both a 1 °F and a 0.5 °C step, so genuine edits still
+        -- pass through while no-op re-saves preserve the device's value.
+        if math.abs(tempC - M.schluterToC(event.TempFloor)) >= M.SETPOINT_EPSILON_C then
+          event.TempFloor = tempFloor
+        end
         event.Active = active == true
         local mapped = M.SCHLUTER_TO_C4_DAY[day]
         if mapped ~= nil then
