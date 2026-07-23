@@ -29,16 +29,6 @@ local TEMP_OUTPUT_BINDING = 5010
 local gDevice = nil
 --- Normalized state derived from gDevice (see schluter.thermostat).
 local gState = nil
---- The proxy's display scale ("C"/"F"), set by the proxy's SET_SCALE command.
---- Schedule setpoints are pushed in this scale so the editor's step size (1 °F /
---- 0.5 °C) matches — otherwise some values aren't selectable. Defaults to F.
-local gScale = "F"
-
---- @return boolean
-local function isCelsius()
-  return tostring(gScale):sub(1, 1):upper() == "C"
-end
-
 -- ─── Command param parsing ─────────────────────────────────────────────────
 
 --- Extract a Celsius value from a proxy setpoint command's params.
@@ -124,30 +114,28 @@ end
 
 -- ─── Schedule (thermostatV2 schedule proxy ⇄ Schluter Schedules[]) ────────────
 
---- Notify the proxy of one schedule entry (values in Celsius; heat-only).
+--- Heat-only placeholder for the cool column (°C). Schluter never cools, but the
+--- proxy's schedule editor still renders a cool setpoint per entry; a 0 there is
+--- read as an unset sentinel (0 K ≈ -460 °F). A high value shows sanely and never
+--- triggers cooling. 35 °C = 95 °F, the convention other heat-only floor drivers use.
+local COOL_PLACEHOLDER_C = 35
+
+--- Notify the proxy of one schedule entry. thermostatV2 schedule setpoints are
+--- canonical decikelvin ((°C + 273.15) × 10) — the same unit the proxy sends on
+--- UPDATE_SCHEDULE_ENTRIES. A scaled value (°F/°C) is misread as Kelvin and
+--- clamped to the setpoint minimum, so always send decikelvin.
 --- @param row table { c4Day, entryIndex, minutes, active, tempC }
 local function pushScheduleEntry(row)
-  -- Push the setpoint in the display scale so the editor's step size matches
-  -- (integer °F, or 0.5 °C) and every value is selectable.
-  local setpoint, units, cool
-  if isCelsius() then
-    setpoint, units, cool = model.normalize(row.tempC), "C", "35"
-  else
-    setpoint, units, cool = model.round(model.cToF(row.tempC)), "F", "95"
-  end
-  -- Schluter is heat-only and never sends a cool setpoint to the device; the
-  -- proxy's schedule editor still shows a cool value per entry, and a 0 there is
-  -- read as an unset sentinel (0 K ≈ -460 °F). Send a fixed high placeholder
-  -- (95 °F / 35 °C, the convention other heat-only floor drivers use) so the
-  -- editor shows a sane value that never triggers cooling.
+  -- No Units field: the setpoints are canonical decikelvin, decoded the same way
+  -- inbound UPDATE_SCHEDULE_ENTRIES arrives (unit-agnostic). Sending Units risks
+  -- the proxy reinterpreting the decikelvin value as °C/°F.
   SendToProxy(PROXY_BINDING, "SCHEDULE_ENTRY_CHANGED", {
     DayIndex = tostring(row.c4Day),
     EntryIndex = tostring(row.entryIndex),
     TimeMinutes = tostring(row.minutes),
     EnabledFlag = row.active and "true" or "false",
-    HeatSetpoint = tostring(setpoint),
-    CoolSetpoint = cool,
-    Units = units,
+    HeatSetpoint = tostring(model.cToC4(row.tempC)),
+    CoolSetpoint = tostring(model.cToC4(COOL_PLACEHOLDER_C)),
   }, "NOTIFY")
 end
 
@@ -252,14 +240,11 @@ function RFP.SET_MODE_OFF(idBinding)
   end)
 end
 
---- The proxy reports the project's display scale ("C"/"F"). Track it and re-push
---- the schedule so setpoints are in that scale (matching the editor's step size).
+--- The proxy reports the project's display scale ("C"/"F"). Setpoints are pushed
+--- as scale-absolute decikelvin, so no conversion is needed; just re-push the
+--- schedule so it repaints promptly when the display scale changes.
 function RFP.SET_SCALE(idBinding, strCommand, tParams)
-  local scale = (tParams or {}).SCALE
-  if scale and scale ~= "" then
-    gScale = scale
-  end
-  log:trace("RFP.SET_SCALE(%s)", tostring(gScale))
+  log:trace("RFP.SET_SCALE(%s)", tostring((tParams or {}).SCALE))
   gScheduleJson = nil
   pushSchedule()
 end
