@@ -1,22 +1,16 @@
---- Driver-wide constants for control4-nuheat.
+--- Driver-wide constants for control4-schluter.
 local M = {}
 
---- Which NuHeat backend the account driver uses (see nuheat.client). "legacy"
---- is the mynuheat.com app API, fully working today. "oauth" is the official
---- api.mynuheat.com OpenAPI, enabled once a ClientID is issued. Kept a constant
---- for now; promote to a Composer property when the oauth backend goes live.
+--- Which backend the account driver uses (see schluter.client). "legacy" is the
+--- ditra-heat-e-wifi.schluter.com app API, fully working today. "oauth" is the
+--- OJ Electronics OpenAPI, enabled once a ClientID is issued.
 M.API_MODE = "legacy"
 
---- Brand config for the legacy backend. NuHeat Signature and Schluter DITRA-HEAT
---- are sibling brands on the same OJ Electronics cloud: identical REST endpoints,
---- scoped by the `Application` id sent at login. Selected by the account driver's
---- "Brand" property.
-M.BRANDS = {
-  ["NuHeat"] = { host = "https://www.mynuheat.com", application = nil },
-  ["Schluter"] = { host = "https://ditra-heat-e-wifi.schluter.com", application = 7 },
-}
---- Fallback when the Brand property is unset/unknown.
-M.DEFAULT_BRAND = "NuHeat"
+--- Legacy backend host + OJ Electronics `Application` id. Schluter DITRA-HEAT is
+--- one brand on the shared OJ cloud; the client is generic (host + application),
+--- so sibling brands (e.g. NuHeat) can be added later by changing these.
+M.LEGACY_HOST = "https://ditra-heat-e-wifi.schluter.com"
+M.LEGACY_APPLICATION = 7
 
 --- C4:SetPropertyAttribs values used by lib.values / lib.utils for runtime
 --- property visibility.
@@ -25,15 +19,15 @@ M.HIDE_PROPERTY = 1
 
 --- Dynamic-binding namespace for thermostat provider bindings on the account
 --- driver (see lib.bindings). Keyed by thermostat serial number.
-M.BINDING_NAMESPACE = "nuheat"
+M.BINDING_NAMESPACE = "schluter"
 
 --- Proprietary connection class shared by the account (provider) and the
---- nuheat_thermostat companion (consumer). Must match the companion driver.xml.
-M.THERMOSTAT_CLASS = "NUHEAT_THERMOSTAT"
+--- schluter_thermostat companion (consumer). Must match the companion driver.xml.
+M.THERMOSTAT_CLASS = "SCHLUTER_THERMOSTAT"
 
 --- Proxy commands exchanged across the account ↔ companion binding.
 M.CMD = {
-  --- account → companion: full NuHeat thermostat object as {JSON=...}
+  --- account → companion: full thermostat object as {JSON=...}
   UPDATE_THERMOSTAT = "updateThermostat",
   --- account → companion: thermostat is gone / logged out
   GO_OFFLINE = "goOffline",

@@ -1,8 +1,8 @@
 <devicedata>
-  <name>NuHeat Thermostat</name>
+  <name>Schluter Thermostat</name>
   <version/>
   <manufacturer>Finite Labs</manufacturer>
-  <model>NuHeat Signature Thermostat</model>
+  <model>Schluter DITRA-HEAT Thermostat</model>
   <creator>Derek Miller</creator>
   <control>lua_gen</control>
   <controlmethod>ip</controlmethod>
@@ -137,7 +137,7 @@
     <hold_modes>Off,2 Hours,Hold Until,Permanent</hold_modes>
   </capabilities>
   <proxies>
-    <proxy proxybindingid="5001" primary="True" name="NuHeat Thermostat">thermostatV2</proxy>
+    <proxy proxybindingid="5001" primary="True" name="Schluter Thermostat">thermostatV2</proxy>
   </proxies>
   <connections>
     <connection>
@@ -159,7 +159,7 @@
     <connection>
       <id>5002</id>
       <facing>6</facing>
-      <connectionname>NuHeat Thermostat</connectionname>
+      <connectionname>Schluter Thermostat</connectionname>
       <type>2</type>
       <consumer>True</consumer>
       <audiosource>False</audiosource>
@@ -167,7 +167,7 @@
       <linelevel>False</linelevel>
       <classes>
         <class>
-          <classname>NUHEAT_THERMOSTAT</classname>
+          <classname>SCHLUTER_THERMOSTAT</classname>
         </class>
       </classes>
       <hidden>False</hidden>

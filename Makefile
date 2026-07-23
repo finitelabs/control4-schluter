@@ -2,7 +2,7 @@
 # Run `make help` for available targets.
 
 DISTRIBUTIONS := oss
-README_DRIVER := nuheat
+README_DRIVER := schluter
 README_BUILD  := oss
 
 # Paths

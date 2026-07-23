@@ -1,9 +1,26 @@
 <!-- Copyright 2026 Finite Labs, LLC. All rights reserved. -->
 
+<style>
+@media print {
+   .noprint {
+      visibility: hidden;
+      display: none;
+   }
+   * {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}
+</style>
+
 # <span style="color:#f78d1f">Overview</span>
+
+<!-- #ifndef DRIVERCENTRAL -->
 
 > DISCLAIMER: This software is neither affiliated with nor endorsed by either
 > Control4 or Schluter.
+
+<!-- #endif -->
 
 The Schluter driver connects Control4 to your Schluter DITRA-HEAT WiFi
 floor-heating thermostats through the myschluter.com cloud service. Enter your

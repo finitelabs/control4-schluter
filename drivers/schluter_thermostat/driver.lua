@@ -2,7 +2,7 @@
 -- TODO: assign a DriverCentral product id (DC_PID) before releasing to DC.
 DC_PID = nil
 DC_X = nil
-DC_FILENAME = "nuheat_thermostat.c4z"
+DC_FILENAME = "schluter_thermostat.c4z"
 --#endif
 
 require("lib.utils")
@@ -14,20 +14,20 @@ require("drivers-common-public.global.url")
 local log = require("lib.logging")
 local JSON = require("JSON")
 
-local model = require("nuheat.thermostat")
+local model = require("schluter.thermostat")
 local constants = require("constants")
 
 --- thermostatV2 proxy (this driver's primary proxy).
 local PROXY_BINDING = 5001
---- Consumer connection bound up to the NuHeat account driver.
+--- Consumer connection bound up to the Schluter account driver.
 local ACCOUNT_BINDING = 5002
 --- Temperature value output connection.
 local TEMP_OUTPUT_BINDING = 5010
 
---- Raw NuHeat thermostat object handed over by the account (mutated in place to
+--- Raw Schluter thermostat object handed over by the account (mutated in place to
 --- build the settings we POST back). `nil` until the first handoff.
 local gDevice = nil
---- Normalized state derived from gDevice (see nuheat.thermostat).
+--- Normalized state derived from gDevice (see schluter.thermostat).
 local gState = nil
 
 -- ─── Command param parsing ─────────────────────────────────────────────────
@@ -103,14 +103,14 @@ local function pushState()
   })
 end
 
---- Send the mutated NuHeat settings object back to the account to write.
+--- Send the mutated Schluter settings object back to the account to write.
 local function pushToAccount()
   if gDevice then
     SendToProxy(ACCOUNT_BINDING, constants.CMD.SET_THERMOSTAT, { JSON = JSON:encode(gDevice) })
   end
 end
 
--- ─── Schedule (thermostatV2 schedule proxy ⇄ NuHeat Schedules[]) ────────────
+-- ─── Schedule (thermostatV2 schedule proxy ⇄ Schluter Schedules[]) ────────────
 
 --- Notify the proxy of one schedule entry (values in Celsius; heat-only).
 --- @param row table { c4Day, entryIndex, minutes, active, tempC }
@@ -195,7 +195,7 @@ local function parseScheduleEntries(tParams)
   return edits
 end
 
--- ─── Proxy command handlers (thermostatV2 → NuHeat) ────────────────────────
+-- ─── Proxy command handlers (thermostatV2 → Schluter) ────────────────────────
 
 local function applyAndSend(idBinding, mutate)
   if idBinding ~= PROXY_BINDING or not gDevice then
@@ -242,7 +242,7 @@ function RFP.SET_MODE_OFF(idBinding)
 end
 
 --- Edit one or more schedule entries. Applies each to the device (propagating
---- across the NuHeat day-group), notifies the proxy of every affected day, and
+--- across the Schluter day-group), notifies the proxy of every affected day, and
 --- writes the mutated schedule back through the account.
 function RFP.SCHEDULE_ENTRY(idBinding, strCommand, tParams)
   log:trace("RFP.SCHEDULE_ENTRY(%s)", idBinding)
@@ -272,7 +272,7 @@ end
 
 -- ─── Account handoff handlers (account → this companion) ────────────────────
 
---- The account hands over the current NuHeat thermostat object.
+--- The account hands over the current Schluter thermostat object.
 function RFP.updateThermostat(idBinding, strCommand, tParams)
   log:trace("RFP.updateThermostat(%s)", idBinding)
   local ok, device = pcall(JSON.decode, JSON, (tParams or {}).JSON or "")

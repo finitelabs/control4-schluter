@@ -1,4 +1,4 @@
-# Contributing to control4-nuheat
+# Contributing to control4-schluter
 
 ## Project Structure
 
@@ -141,7 +141,7 @@ Lua, XML, and Markdown:
 DC_PID = 1234
 DC_FILENAME = "driver.c4z"
 --#else
-DRIVER_GITHUB_REPO = "finitelabs/control4-nuheat"
+DRIVER_GITHUB_REPO = "finitelabs/control4-schluter"
 --#endif
 ```
 

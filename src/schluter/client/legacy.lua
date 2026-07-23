@@ -1,10 +1,10 @@
---- Legacy NuHeat backend — the undocumented mynuheat.com app API.
+--- Legacy Schluter backend — the undocumented myschluter.com app API.
 ---
---- This is the same REST surface the NuHeat mobile app / web dashboard and the
+--- This is the same REST surface the Schluter mobile app / web dashboard and the
 --- original (now unmaintained) Control4 driver used. The client owns its own
 --- session: authenticate() stores the SessionId and every other call uses it.
 --- All methods return a Deferred that resolves with the decoded JSON body (or
---- rejects). See docs/nuheat-api-reference.md.
+--- rejects). See docs/schluter-api-reference.md.
 ---
 --- API surface:
 ---   POST /api/authenticate/user            -> { ErrorCode, SessionId }
@@ -21,26 +21,26 @@ local http = require("lib.http")
 local log = require("lib.logging")
 local JSON = require("JSON")
 
---- Default host (NuHeat). Schluter DITRA-HEAT uses the same API on a different
+--- Default host (Schluter). Schluter DITRA-HEAT uses the same API on a different
 --- host + Application id; both are configured via new({ host, applicationId }).
-local DEFAULT_HOST = "https://www.mynuheat.com"
+local DEFAULT_HOST = "https://www.myschluter.com"
 local HEADERS = { ["Content-Type"] = "application/json; charset=utf-8" }
 -- The notification endpoint long-polls: the server holds the request open until
 -- a change occurs or the timeout elapses. Give it well over the ~5 min the old
 -- driver used so we don't tear the connection down early.
 local NOTIFY_TIMEOUT_S = 330
 
---- @class NuHeatAuthError
---- @field errorCode number NuHeat ErrorCode (1/2 = invalid credentials)
+--- @class SchluterAuthError
+--- @field errorCode number Schluter ErrorCode (1/2 = invalid credentials)
 --- @field message string Human-readable message
 
---- @class NuHeatLegacyClient
+--- @class SchluterLegacyClient
 local Client = {}
 Client.__index = Client
 
 --- @param config table|nil { host?: string, applicationId?: number } — brand host
---- and OJ Application id (Schluter=7; NuHeat omits it).
---- @return NuHeatLegacyClient
+--- and OJ Application id (Schluter=7; Schluter omits it).
+--- @return SchluterLegacyClient
 function Client:new(config)
   config = config or {}
   return setmetatable({
@@ -89,14 +89,14 @@ end
 
 -- ─── Auth / session ────────────────────────────────────────────────────────
 
---- Authenticate against mynuheat.com and hold the resulting session id.
+--- Authenticate against myschluter.com and hold the resulting session id.
 --- @param email string
 --- @param password string
---- @return Deferred<boolean, NuHeatAuthError>
+--- @return Deferred<boolean, SchluterAuthError>
 function Client:authenticate(email, password)
   log:trace("legacy:authenticate(%s)", email)
   local d = deferred.new()
-  -- Confirm is used by NuHeat; Application scopes the OJ tenant (Schluter=7).
+  -- Confirm is used by Schluter; Application scopes the OJ tenant (Schluter=7).
   local payload = { Email = email, Password = password, Confirm = password }
   if self._applicationId ~= nil then
     payload.Application = self._applicationId
@@ -140,12 +140,12 @@ end
 
 -- ─── Thermostats ───────────────────────────────────────────────────────────
 
---- List the thermostats visible to this account (grouped at mynuheat.com/#groups).
+--- List the thermostats visible to this account (grouped at myschluter.com/#groups).
 --- @return Deferred<table[], any>
 function Client:getThermostats()
   log:trace("legacy:getThermostats()")
   return self:_getJson("/api/thermostats" .. _query({ sessionid = self._sessionId })):next(function(result)
-    -- Normalize to a bare array of thermostat objects. NuHeat returns
+    -- Normalize to a bare array of thermostat objects. Schluter returns
     -- `Thermostats`; Schluter wraps them in `Groups[].Thermostats`.
     if type(result.Groups) == "table" then
       local list = {}
@@ -173,7 +173,7 @@ function Client:getThermostat(serialNumber)
 end
 
 --- Push a mutated settings object to a thermostat (setpoint / mode / hold and/or
---- Schedules[]). The object is the canonical NuHeat thermostat shape.
+--- Schedules[]). The object is the canonical Schluter thermostat shape.
 --- @param serialNumber string
 --- @param settings table
 --- @return Deferred<table, any>

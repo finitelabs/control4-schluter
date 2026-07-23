@@ -2,14 +2,14 @@
 -- TODO: assign a DriverCentral product id (DC_PID) before releasing to DC.
 DC_PID = nil
 DC_X = nil
-DC_FILENAME = "nuheat.c4z"
+DC_FILENAME = "schluter.c4z"
 --#endif
 
 --#ifndef DRIVERCENTRAL
-DRIVER_GITHUB_REPO = "finitelabs/control4-nuheat"
+DRIVER_GITHUB_REPO = "finitelabs/control4-schluter"
 DRIVER_FILENAMES = {
-  "nuheat.c4z",
-  "nuheat_thermostat.c4z",
+  "schluter.c4z",
+  "schluter_thermostat.c4z",
 }
 --#endif
 
@@ -26,29 +26,24 @@ local githubUpdater = require("lib.github-updater")
 --#endif
 local JSON = require("JSON")
 
-local clientFactory = require("nuheat.client")
+local clientFactory = require("schluter.client")
 local constants = require("constants")
 
 local NS = constants.BINDING_NAMESPACE
 local CMD = constants.CMD
 
--- The backend (legacy mynuheat.com or official OAuth) owns its own session; the
--- driver is backend-agnostic and only speaks the NuHeatClient contract. The
--- legacy backend is brand-configurable (NuHeat / Schluter — same OJ API).
---- @type table
-local client
-
---- Build the client for the currently-selected Brand.
-local function rebuildClient()
-  local brand = constants.BRANDS[Properties["Brand"]] or constants.BRANDS[constants.DEFAULT_BRAND]
-  client = clientFactory.create(constants.API_MODE, { host = brand.host, applicationId = brand.application })
-end
+-- The backend (legacy Schluter app API or official OAuth) owns its own session;
+-- the driver is backend-agnostic and only speaks the client contract.
+local client = clientFactory.create(constants.API_MODE, {
+  host = constants.LEGACY_HOST,
+  applicationId = constants.LEGACY_APPLICATION,
+})
 
 --- Runtime state (not persisted; rebuilt on login).
 local gState = {
   --- @type number Notification cursor (legacy long-poll; ignored by oauth).
   sequenceNr = 0,
-  --- @type table<string, table> serial number -> latest NuHeat thermostat object
+  --- @type table<string, table> serial number -> latest Schluter thermostat object
   devices = {},
 }
 
@@ -56,7 +51,7 @@ local gState = {
 --- from firing while Composer loads the initial property values.
 local gInitialized = false
 
---- All nuheat account instances on this controller, sorted by device id. Used
+--- All schluter account instances on this controller, sorted by device id. Used
 --- for leader election (lowest id is the leader that runs updates).
 --- @return integer[]
 local function getAccountDriverIds()
@@ -114,7 +109,7 @@ end
 --- Store a thermostat object, ensure its provider binding exists, register a
 --- bind handler that (re)hands the device off when a companion connects, and
 --- push the current state to any companion already bound.
---- @param device table NuHeat thermostat object
+--- @param device table Schluter thermostat object
 local function ingestThermostat(device)
   local serial = tostring(device.SerialNumber)
   if serial == "nil" or serial == "" then
@@ -126,7 +121,7 @@ local function ingestThermostat(device)
     serial,
     "PROXY",
     true,
-    device.Room or device.GroupName or ("NuHeat " .. serial),
+    device.Room or device.GroupName or ("Schluter " .. serial),
     constants.THERMOSTAT_CLASS
   )
   if binding then
@@ -176,7 +171,7 @@ armNotifications = function()
     armNotifications()
   end, function(err)
     log:trace("notification poll ended (%s); re-arming", err)
-    SetTimer("NuHeatNotify", 5 * ONE_SECOND, armNotifications)
+    SetTimer("SchluterNotify", 5 * ONE_SECOND, armNotifications)
   end)
 end
 
@@ -232,7 +227,6 @@ function OnDriverInit()
   log:setLogLevel(Properties["Log Level"])
   log:setLogMode(Properties["Log Mode"])
   log:trace("OnDriverInit()")
-  rebuildClient()
 end
 
 function OnDriverLateInit()
@@ -265,18 +259,6 @@ function OPC.Log_Mode(propertyValue)
   log:setLogMode(propertyValue)
 end
 
---- Switch brand (NuHeat / Schluter): rebuild the client for the new host +
---- Application id and re-login.
-function OPC.Brand()
-  bindings:deleteAllBindings(NS)
-  gState.devices = {}
-  if client then
-    client:logout()
-  end
-  rebuildClient()
-  login()
-end
-
 function OPC.Email()
   login()
 end
@@ -305,7 +287,7 @@ end
 
 -- ─── Messages from a companion (RFP dispatch) ──────────────────────────────
 
---- A companion pushes mutated settings for us to write to NuHeat.
+--- A companion pushes mutated settings for us to write to Schluter.
 --- @param idBinding integer
 --- @param strCommand string
 --- @param tParams table

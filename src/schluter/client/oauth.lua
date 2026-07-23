@@ -1,17 +1,17 @@
---- OAuth2 NuHeat backend — the documented OpenAPI at api.mynuheat.com.
+--- OAuth2 Schluter backend — the documented OpenAPI at api.myschluter.com.
 ---
---- Drop-in replacement for nuheat.client.legacy that speaks the official,
---- supported API (OAuth2/OpenID via identity.mynuheat.com, dedicated
+--- Drop-in replacement for schluter.client.legacy that speaks the official,
+--- supported API (OAuth2/OpenID via identity.myschluter.com, dedicated
 --- Thermostat / Schedule / Group / EnergyLog endpoints). It translates the
---- OpenAPI models to/from the canonical NuHeat thermostat shape the drivers
+--- OpenAPI models to/from the canonical Schluter thermostat shape the drivers
 --- already consume, so the account/companion code is unchanged.
 ---
 --- STATUS: skeleton. The endpoint mapping and model translation are written
---- against the published OpenAPI spec (api.mynuheat.com/swagger/v1/swagger.json),
+--- against the published OpenAPI spec (api.myschluter.com/swagger/v1/swagger.json),
 --- but two things must be confirmed against a live account before this is
 --- production-ready, both marked `-- TODO(oauth)` below:
----   1. The OAuth2 grant type NuHeat enables for integrators (and thus the exact
----      token request) — pending a ClientID from NuHeat support.
+---   1. The OAuth2 grant type Schluter enables for integrators (and thus the exact
+---      token request) — pending a ClientID from Schluter support.
 ---   2. The ThermostatModel field names + temperature units (the spec lists the
 ---      schema shape but not units; legacy is °C×100).
 --- Everything is centralized so those are one-line fixes once verified.
@@ -21,9 +21,9 @@ local http = require("lib.http")
 local log = require("lib.logging")
 local JSON = require("JSON")
 
--- Regional host: api.mynuheat.com (global) or api.nam.mynuheat.com (N. America).
-local API_BASE = "https://api.mynuheat.com"
-local IDENTITY_BASE = "https://identity.mynuheat.com"
+-- Regional host: api.myschluter.com (global) or api.nam.myschluter.com (N. America).
+local API_BASE = "https://api.myschluter.com"
+local IDENTITY_BASE = "https://identity.myschluter.com"
 local TOKEN_URL = IDENTITY_BASE .. "/connect/token"
 local SCOPES = "openid openapi offline_access"
 -- Poll interval for change detection (the official API has no long-poll).
@@ -31,12 +31,12 @@ local POLL_INTERVAL_MS = 60 * 1000
 -- Refresh the access token this many seconds before it actually expires.
 local TOKEN_SKEW_S = 60
 
---- @class NuHeatOAuthClient
+--- @class SchluterOAuthClient
 local Client = {}
 Client.__index = Client
 
 --- @param config table|nil { clientId, clientSecret, scopes?, apiBase?, region? }
---- @return NuHeatOAuthClient
+--- @return SchluterOAuthClient
 function Client:new(config)
   config = config or {}
   return setmetatable({
@@ -57,7 +57,7 @@ end
 --- Store credentials and acquire an initial access token.
 --- @param email string
 --- @param password string
---- @return Deferred<boolean, NuHeatAuthError>
+--- @return Deferred<boolean, SchluterAuthError>
 function Client:authenticate(email, password)
   log:trace("oauth:authenticate(%s)", email)
   self._email = email
@@ -77,7 +77,7 @@ function Client:logout()
 end
 
 --- Ensure a live access token, acquiring or refreshing as needed.
---- @return Deferred<string, NuHeatAuthError> resolves with the access token
+--- @return Deferred<string, SchluterAuthError> resolves with the access token
 function Client:_ensureToken()
   if self:isAuthenticated() then
     return deferred.new():resolve(self._accessToken)
@@ -85,7 +85,7 @@ function Client:_ensureToken()
   if not self._clientId then
     return deferred.new():reject({
       errorCode = -1,
-      message = "OAuth ClientID not configured (request one from NuHeat support)",
+      message = "OAuth ClientID not configured (request one from Schluter support)",
     })
   end
 
@@ -99,7 +99,7 @@ function Client:_ensureToken()
       client_secret = self._clientSecret,
     }
   else
-    -- TODO(oauth): confirm the grant type NuHeat enables for integrators. This
+    -- TODO(oauth): confirm the grant type Schluter enables for integrators. This
     -- assumes Resource Owner Password Credentials; may instead be authorization
     -- code (needs a browser redirect) or device code. Kept isolated here.
     form = {
@@ -216,7 +216,7 @@ function Client:getNotification(sequenceNr)
   return d
 end
 
--- ─── Model translation (OpenAPI ⇄ canonical NuHeat shape) ──────────────────
+-- ─── Model translation (OpenAPI ⇄ canonical Schluter shape) ──────────────────
 
 --- ThermostatModel → canonical thermostat object.
 --- TODO(oauth): confirm OpenAPI field names + temperature units against a live
