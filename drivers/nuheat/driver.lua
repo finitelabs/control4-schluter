@@ -5,6 +5,14 @@ DC_X = nil
 DC_FILENAME = "nuheat.c4z"
 --#endif
 
+--#ifndef DRIVERCENTRAL
+DRIVER_GITHUB_REPO = "finitelabs/control4-nuheat"
+DRIVER_FILENAMES = {
+  "nuheat.c4z",
+  "nuheat_thermostat.c4z",
+}
+--#endif
+
 require("lib.utils")
 require("drivers-common-public.global.handlers")
 require("drivers-common-public.global.lib")
@@ -28,9 +36,11 @@ local client = NuHeatClient:new()
 
 --- Runtime state (not persisted; rebuilt on login).
 local gState = {
+  --- @type string|nil
   sessionId = nil,
+  --- @type number
   sequenceNr = 0,
-  --- serial number -> latest NuHeat thermostat object
+  --- @type table<string, table> serial number -> latest NuHeat thermostat object
   devices = {},
 }
 
@@ -44,12 +54,12 @@ local function handoff(serial)
   if not device or not binding then
     return
   end
-  C4:SendToProxy(binding.bindingId, CMD.UPDATE_THERMOSTAT, { JSON = JSON:encode(device) })
+  SendToProxy(binding.bindingId, CMD.UPDATE_THERMOSTAT, { JSON = JSON:encode(device) })
 end
 
 --- Resolve the serial number behind a dynamic binding id.
 --- @param idBinding integer
---- @return string|nil
+--- @return string|nil serial
 local function serialForBinding(idBinding)
   for serial, binding in pairs(bindings:getDynamicBindings(NS)) do
     if binding.bindingId == idBinding then
@@ -61,8 +71,9 @@ end
 
 -- ─── Thermostat discovery ──────────────────────────────────────────────────
 
---- Store a thermostat object, ensure its provider binding exists, and hand it
---- off to any bound companion.
+--- Store a thermostat object, ensure its provider binding exists, register a
+--- bind handler that (re)hands the device off when a companion connects, and
+--- push the current state to any companion already bound.
 --- @param device table NuHeat thermostat object
 local function ingestThermostat(device)
   local serial = tostring(device.SerialNumber)
@@ -70,7 +81,7 @@ local function ingestThermostat(device)
     return
   end
   gState.devices[serial] = device
-  bindings:getOrAddDynamicBinding(
+  local binding = bindings:getOrAddDynamicBinding(
     NS,
     serial,
     "PROXY",
@@ -78,6 +89,15 @@ local function ingestThermostat(device)
     device.Room or device.GroupName or ("NuHeat " .. serial),
     constants.THERMOSTAT_CLASS
   )
+  if binding then
+    -- OnBindingChanged is dispatched per binding id (see OBC in handlers.lua):
+    -- hand off the current device whenever a companion binds.
+    OBC[binding.bindingId] = function(_idBinding, _strClass, bIsBound)
+      if bIsBound then
+        handoff(serial)
+      end
+    end
+  end
   handoff(serial)
 end
 
@@ -101,7 +121,8 @@ end
 
 -- ─── Real-time notification long-poll ──────────────────────────────────────
 
-local armNotifications -- forward declaration
+--- @type fun(): void
+local armNotifications
 
 armNotifications = function()
   if not gState.sessionId then
@@ -116,7 +137,7 @@ armNotifications = function()
     armNotifications()
   end, function(err)
     log:trace("notification poll ended (%s); re-arming", err)
-    C4:SetTimer(5000, armNotifications)
+    SetTimer("NuHeatNotify", 5 * ONE_SECOND, armNotifications)
   end)
 end
 
@@ -143,6 +164,23 @@ local function login()
   end)
 end
 
+--#ifndef DRIVERCENTRAL
+--- Update the driver(s) from the GitHub repository.
+--- @param forceUpdate? boolean Force the update even if already up to date.
+local function updateDrivers(forceUpdate)
+  log:trace("updateDrivers(%s)", forceUpdate)
+  githubUpdater
+    :updateAll(DRIVER_GITHUB_REPO, DRIVER_FILENAMES, Properties["Update Channel"] == "Prerelease", forceUpdate)
+    :next(function(updatedDrivers)
+      if updatedDrivers and #updatedDrivers > 0 then
+        log:info("Updated driver(s): %s", table.concat(updatedDrivers, ","))
+      end
+    end, function(err)
+      log:warn("driver update failed: %s", err)
+    end)
+end
+--#endif
+
 -- ─── Lifecycle ─────────────────────────────────────────────────────────────
 
 function OnDriverInit()
@@ -162,64 +200,60 @@ function OnDriverLateInit()
   log:trace("OnDriverLateInit()")
   bindings:restoreBindings()
   C4:UpdateProperty("Driver Version", C4:GetDriverConfigInfo("version"))
-  --#ifndef DRIVERCENTRAL
-  githubUpdater:init()
-  --#endif
   login()
 end
 
-function OnPropertyChanged(strProperty)
-  log:trace("OnPropertyChanged(%s)", strProperty)
-  if strProperty == "Log Level" then
-    log:setLogLevel(Properties["Log Level"])
-  elseif strProperty == "Log Mode" then
-    log:setLogMode(Properties["Log Mode"])
-  elseif strProperty == "Email" or strProperty == "Password" then
-    login()
-  end
+-- ─── Property handlers (OPC dispatch) ──────────────────────────────────────
+
+function OPC.Log_Level(propertyValue)
+  log:setLogLevel(propertyValue)
 end
 
---- A companion bound/unbound to one of our thermostat provider bindings.
-function OnBindingChanged(idBinding, strClass, bIsBound)
-  log:trace("OnBindingChanged(%s, %s, %s)", idBinding, strClass, bIsBound)
-  local serial = serialForBinding(idBinding)
-  if not serial then
-    return
-  end
-  if bIsBound then
-    handoff(serial)
-  end
+function OPC.Log_Mode(propertyValue)
+  log:setLogMode(propertyValue)
 end
 
---- Messages from a companion: it pushes mutated settings to write to NuHeat.
-function ReceivedFromProxy(idBinding, strCommand, tParams)
-  log:trace("ReceivedFromProxy(%s, %s)", idBinding, strCommand)
-  tParams = tParams or {}
+function OPC.Email()
+  login()
+end
+
+function OPC.Password()
+  login()
+end
+
+-- ─── Messages from a companion (RFP dispatch) ──────────────────────────────
+
+--- A companion pushes mutated settings for us to write to NuHeat.
+--- @param idBinding integer
+--- @param strCommand string
+--- @param tParams table
+function RFP.setThermostat(idBinding, strCommand, tParams)
+  log:trace("RFP.setThermostat(%s)", idBinding)
   local serial = serialForBinding(idBinding)
   if not serial or not gState.sessionId then
     return
   end
-  if strCommand == CMD.SET_THERMOSTAT then
-    local ok, settings = pcall(JSON.decode, JSON, tParams.JSON or "")
-    if not ok or type(settings) ~= "table" then
-      return
-    end
-    client:setThermostat(gState.sessionId, serial, settings):next(function(updated)
-      gState.devices[serial] = updated.Thermostat or updated
-      handoff(serial)
-    end, function(err)
-      log:warn("setThermostat failed for %s: %s", serial, err)
-    end)
+  local ok, settings = pcall(JSON.decode, JSON, (tParams or {}).JSON or "")
+  if not ok or type(settings) ~= "table" then
+    return
   end
+  client:setThermostat(gState.sessionId, serial, settings):next(function(updated)
+    gState.devices[serial] = updated.Thermostat or updated
+    handoff(serial)
+  end, function(err)
+    log:warn("setThermostat failed for %s: %s", serial, err)
+  end)
 end
 
--- ─── Actions ───────────────────────────────────────────────────────────────
+-- ─── Actions (EC dispatch) ─────────────────────────────────────────────────
 
 function EC.Refresh_Thermostats()
+  log:trace("EC.Refresh_Thermostats()")
   refreshThermostats()
 end
 
 function EC.Reset_Driver(tParams)
+  log:trace("EC.Reset_Driver()")
   if (tParams or {})["Are You Sure?"] == "Yes" then
     bindings:deleteAllBindings(NS)
     gState.devices = {}
@@ -227,3 +261,10 @@ function EC.Reset_Driver(tParams)
     login()
   end
 end
+
+--#ifndef DRIVERCENTRAL
+function EC.Update_Drivers()
+  log:trace("EC.Update_Drivers()")
+  updateDrivers(true)
+end
+--#endif
