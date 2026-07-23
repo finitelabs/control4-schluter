@@ -129,19 +129,24 @@ end
 local function pushScheduleEntry(row)
   -- Push the setpoint in the display scale so the editor's step size matches
   -- (integer °F, or 0.5 °C) and every value is selectable.
-  local setpoint, units
+  local setpoint, units, cool
   if isCelsius() then
-    setpoint, units = model.normalize(row.tempC), "C"
+    setpoint, units, cool = model.normalize(row.tempC), "C", "35"
   else
-    setpoint, units = model.round(model.cToF(row.tempC)), "F"
+    setpoint, units, cool = model.round(model.cToF(row.tempC)), "F", "95"
   end
+  -- Schluter is heat-only and never sends a cool setpoint to the device; the
+  -- proxy's schedule editor still shows a cool value per entry, and a 0 there is
+  -- read as an unset sentinel (0 K ≈ -460 °F). Send a fixed high placeholder
+  -- (95 °F / 35 °C, the convention other heat-only floor drivers use) so the
+  -- editor shows a sane value that never triggers cooling.
   SendToProxy(PROXY_BINDING, "SCHEDULE_ENTRY_CHANGED", {
     DayIndex = tostring(row.c4Day),
     EntryIndex = tostring(row.entryIndex),
     TimeMinutes = tostring(row.minutes),
     EnabledFlag = row.active and "true" or "false",
     HeatSetpoint = tostring(setpoint),
-    CoolSetpoint = "0",
+    CoolSetpoint = cool,
     Units = units,
   }, "NOTIFY")
 end
