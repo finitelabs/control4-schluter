@@ -1,0 +1,185 @@
+<devicedata>
+  <name>NuHeat Thermostat</name>
+  <version/>
+  <manufacturer>Finite Labs</manufacturer>
+  <model>NuHeat Signature Thermostat</model>
+  <creator>Derek Miller</creator>
+  <small image_source="c4z">icons/device_sm.png</small>
+  <large image_source="c4z">icons/device_lg.png</large>
+  <control>lua_gen</control>
+  <controlmethod>ip</controlmethod>
+  <driver>DriverWorks</driver>
+  <copyright>Copyright 2026 Finite Labs, LLC. All rights reserved.</copyright>
+  <created>07/23/2026 12:00:00 PM</created>
+  <modified/>
+  <minimum_os_version>3.3.0</minimum_os_version>
+  <composer_categories>
+    <category>Comfort</category>
+  </composer_categories>
+  <config>
+    <script file="driver.lua" jit="1"/>
+    <documentation file="www/documentation/index.html"/>
+    <properties>
+      <property>
+        <name>Cloud</name>
+        <type>LABEL</type>
+        <default>Cloud Settings</default>
+      </property>
+      <!-- #ifdef DRIVERCENTRAL -->
+      <property>
+        <name>Cloud Status</name>
+        <default/>
+        <type>STRING</type>
+        <readonly>true</readonly>
+      </property>
+      <property>
+        <name>Automatic Updates</name>
+        <type>LIST</type>
+        <items>
+          <item>Off</item>
+          <item>On</item>
+        </items>
+        <default>On</default>
+      </property>
+      <!-- #endif -->
+      <property>
+        <name>Driver</name>
+        <type>LABEL</type>
+        <default>Driver Settings</default>
+      </property>
+      <property>
+        <name>Driver Status</name>
+        <type>STRING</type>
+        <default/>
+        <readonly>true</readonly>
+      </property>
+      <property>
+        <name>Driver Version</name>
+        <type>STRING</type>
+        <default/>
+        <readonly>true</readonly>
+      </property>
+      <property>
+        <name>Serial ID</name>
+        <type>STRING</type>
+        <default/>
+        <readonly>true</readonly>
+      </property>
+      <property>
+        <name>Log Level</name>
+        <type>LIST</type>
+        <default>3 - Info</default>
+        <items>
+          <item>0 - Fatal</item>
+          <item>1 - Error</item>
+          <item>2 - Warning</item>
+          <item>3 - Info</item>
+          <item>4 - Debug</item>
+          <item>5 - Trace</item>
+          <item>6 - Ultra</item>
+        </items>
+      </property>
+      <property>
+        <name>Log Mode</name>
+        <type>LIST</type>
+        <default>Off</default>
+        <items>
+          <item>Off</item>
+          <item>Print</item>
+          <item>Log</item>
+          <item>Print and Log</item>
+        </items>
+      </property>
+    </properties>
+    <actions/>
+  </config>
+  <capabilities>
+    <can_heat>False</can_heat>
+    <can_cool>False</can_cool>
+    <can_auto>False</can_auto>
+    <has_humidity>False</has_humidity>
+    <has_single_setpoint>True</has_single_setpoint>
+    <can_preset>False</can_preset>
+    <can_preset_schedule>False</can_preset_schedule>
+    <has_temperature>True</has_temperature>
+    <current_temperature_min_c>0</current_temperature_min_c>
+    <current_temperature_max_c>99</current_temperature_max_c>
+    <current_temperature_min_f>32</current_temperature_min_f>
+    <current_temperature_max_f>210</current_temperature_max_f>
+    <current_temperature_resolution_c>0.5</current_temperature_resolution_c>
+    <current_temperature_resolution_f>1</current_temperature_resolution_f>
+    <setpoint_resolution_c>0.5</setpoint_resolution_c>
+    <setpoint_resolution_f>1</setpoint_resolution_f>
+    <setpoint_heat_min_c>5</setpoint_heat_min_c>
+    <setpoint_heat_max_c>70</setpoint_heat_max_c>
+    <setpoint_heat_min_f>41</setpoint_heat_min_f>
+    <setpoint_heat_max_f>158</setpoint_heat_max_f>
+    <setpoint_single_min_c>5</setpoint_single_min_c>
+    <setpoint_single_max_c>70</setpoint_single_max_c>
+    <setpoint_single_min_f>41</setpoint_single_min_f>
+    <setpoint_single_max_f>158</setpoint_single_max_f>
+    <setpoint_single_resolution_c>0.5</setpoint_single_resolution_c>
+    <setpoint_single_resolution_f>1</setpoint_single_resolution_f>
+    <can_inc_dec_setpoints>True</can_inc_dec_setpoints>
+    <can_change_scale>False</can_change_scale>
+    <has_extras>False</has_extras>
+    <has_vacation_mode>False</has_vacation_mode>
+    <has_remote_sensor>False</has_remote_sensor>
+    <fan_modes/>
+    <hvac_modes>Off,Heat</hvac_modes>
+    <hold_modes>Off,2 Hours,Hold Until,Permanent</hold_modes>
+  </capabilities>
+  <proxies>
+    <proxy proxybindingid="5001" primary="True" name="NuHeat Thermostat">thermostatV2</proxy>
+  </proxies>
+  <connections>
+    <connection>
+      <id>5001</id>
+      <facing>6</facing>
+      <connectionname>Thermostat</connectionname>
+      <type>2</type>
+      <consumer>False</consumer>
+      <audiosource>False</audiosource>
+      <videosource>False</videosource>
+      <linelevel>False</linelevel>
+      <classes>
+        <class>
+          <classname>THERMOSTAT</classname>
+        </class>
+      </classes>
+      <hidden>True</hidden>
+    </connection>
+    <connection>
+      <id>5002</id>
+      <facing>6</facing>
+      <connectionname>NuHeat Thermostat</connectionname>
+      <type>2</type>
+      <consumer>True</consumer>
+      <audiosource>False</audiosource>
+      <videosource>False</videosource>
+      <linelevel>False</linelevel>
+      <classes>
+        <class>
+          <classname>NUHEAT_THERMOSTAT</classname>
+        </class>
+      </classes>
+      <hidden>False</hidden>
+    </connection>
+    <connection>
+      <id>5010</id>
+      <facing>6</facing>
+      <connectionname>Temperature</connectionname>
+      <type>6</type>
+      <consumer>False</consumer>
+      <audiosource>False</audiosource>
+      <videosource>False</videosource>
+      <linelevel>False</linelevel>
+      <classes>
+        <class>
+          <classname>TEMPERATURE_VALUE</classname>
+        </class>
+      </classes>
+      <hidden>False</hidden>
+    </connection>
+  </connections>
+</devicedata>
