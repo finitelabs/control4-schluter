@@ -113,8 +113,11 @@ end
 function M.capabilities(state)
   return {
     allowedHvacModes = "Off,Heat",
-    hasSingleSetpoint = true,
-    canHeat = false,
+    -- Heat-setpoint model (like the original NuHeat driver): a single Heat
+    -- setpoint, not the single_setpoint model. The C4 schedule editor only lets
+    -- you pick a temperature in the heat-setpoint model.
+    hasSingleSetpoint = false,
+    canHeat = true,
     canCool = false,
     canAuto = false,
     minSetpointC = state.minC,

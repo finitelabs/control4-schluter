@@ -92,11 +92,11 @@
     <actions/>
   </config>
   <capabilities>
-    <can_heat>False</can_heat>
+    <can_heat>True</can_heat>
     <can_cool>False</can_cool>
     <can_auto>False</can_auto>
     <has_humidity>False</has_humidity>
-    <has_single_setpoint>True</has_single_setpoint>
+    <has_single_setpoint>False</has_single_setpoint>
     <can_preset>False</can_preset>
     <can_preset_schedule>False</can_preset_schedule>
     <has_temperature>True</has_temperature>

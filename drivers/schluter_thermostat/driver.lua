@@ -72,11 +72,13 @@ local function pushCapabilities()
     CAN_COOL = caps.canCool,
     CAN_AUTO = caps.canAuto,
   }, "NOTIFY")
+  -- Heat setpoint bounds (heat-setpoint model). Static bounds also come from
+  -- driver.xml; send the device's actual range so it tracks the thermostat.
   SendToProxy(PROXY_BINDING, "DYNAMIC_CAPABILITIES_CHANGED", {
-    SETPOINT_SINGLE_MIN_C = caps.minSetpointC,
-    SETPOINT_SINGLE_MAX_C = caps.maxSetpointC,
-    SETPOINT_SINGLE_MIN_F = model.round(model.cToF(caps.minSetpointC)),
-    SETPOINT_SINGLE_MAX_F = model.round(model.cToF(caps.maxSetpointC)),
+    SETPOINT_HEAT_MIN_C = caps.minSetpointC,
+    SETPOINT_HEAT_MAX_C = caps.maxSetpointC,
+    SETPOINT_HEAT_MIN_F = model.round(model.cToF(caps.minSetpointC)),
+    SETPOINT_HEAT_MAX_F = model.round(model.cToF(caps.maxSetpointC)),
   }, "NOTIFY")
 end
 
@@ -92,7 +94,7 @@ local function pushState()
     TEMPERATURE = tostring(gState.temperatureC),
     SCALE = "C",
   }, "NOTIFY")
-  SendToProxy(PROXY_BINDING, "SINGLE_SETPOINT_CHANGED", {
+  SendToProxy(PROXY_BINDING, "HEAT_SETPOINT_CHANGED", {
     SETPOINT = tostring(gState.setpointC),
     SCALE = "C",
   }, "NOTIFY")
