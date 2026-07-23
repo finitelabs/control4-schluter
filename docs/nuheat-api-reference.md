@@ -89,6 +89,35 @@ NuheatToControl4 = {1,2,3,4,5,6,0}
 Control4ToNuheat = {[0]=7,[1]=1,[2]=2,[3]=3,[4]=4,[5]=5,[6]=6}
 ```
 
+## Account → companion handoff & dynamic capabilities
+
+Follows esphome's model (`drivers/esphome_climate` + `src/lib/bindings.lua`):
+
+1. **Account** logs in, calls `getThermostats`, and for each thermostat creates a
+   dynamic PROXY binding keyed by serial number:
+   `Bindings:getOrAddDynamicBinding("nuheat", SerialNumber, "PROXY", true, Room/GroupName, "NUHEAT_THERMOSTAT")`.
+   Bindings persist and restore across restarts (bindings lib manages id ranges).
+2. When a **companion** binds (`OnBindingChanged`), the account hands it the full
+   NuHeat thermostat object as `{JSON=...}` (and on every notification update).
+3. **Companion** derives its Control4 thermostat-proxy capabilities from that
+   device object and pushes them dynamically — it advertises only what the
+   handed device actually supports (don't hard-code):
+   - `SendToProxy(PROXY, "ALLOWED_HVAC_MODES_CHANGED", { MODES = "Off,Heat" }, "NOTIFY")`
+     — NuHeat is heat-only.
+   - `SendToProxy(PROXY, "DYNAMIC_CAPABILITIES_CHANGED", { HAS_SINGLE_SETPOINT=true,
+     CAN_HEAT=false, CAN_COOL=false, CAN_AUTO=false }, "NOTIFY")` — per C4 rule the
+     `CAN_*` flags must be false when `HAS_SINGLE_SETPOINT` is true.
+   - Temperature bounds from `MinTemp`/`MaxTemp`; scale from the C4 UI.
+   - Schedule support (NuHeat `Schedules[]`) advertised only if present.
+   - Hold/operating mode surfaced via `HAS_EXTRAS` + an `<extras_setup>` section
+     ("Operating Mode": Auto / Hold Until / 2 Hours / Permanent), mirroring how
+     esphome_climate exposes device-specific extras.
+   - Energy (`EnergyOverview`/`KwCharge`/`WPerSquareUnit`) optionally as a
+     read-only extras section if the device reports it.
+
+This keeps the companion generic: a future NuHeat model that adds/removes a
+feature just changes what the account hands over, and the companion re-advertises.
+
 ## Config / properties
 Account driver: Email, Password, Login Status ("Logged In" / "Invalid username or
 password"). Thermostats must be added to a **group** at `mynuheat.com/#groups` for the
