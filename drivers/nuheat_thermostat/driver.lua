@@ -190,6 +190,10 @@ function OPC.Log_Mode(propertyValue)
   log:setLogMode(propertyValue)
 end
 
+function OPC.Driver_Version()
+  C4:UpdateProperty("Driver Version", C4:GetDriverConfigInfo("version"))
+end
+
 function OnDriverInit()
   --#ifdef DRIVERCENTRAL
   require("cloud-client-byte")

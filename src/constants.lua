@@ -1,6 +1,11 @@
 --- Driver-wide constants for control4-nuheat.
 local M = {}
 
+--- C4:SetPropertyAttribs values used by lib.values / lib.utils for runtime
+--- property visibility.
+M.SHOW_PROPERTY = 0
+M.HIDE_PROPERTY = 1
+
 --- Dynamic-binding namespace for thermostat provider bindings on the account
 --- driver (see lib.bindings). Keyed by thermostat serial number.
 M.BINDING_NAMESPACE = "nuheat"

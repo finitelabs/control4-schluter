@@ -33,6 +33,7 @@
         <type>STRING</type>
         <readonly>true</readonly>
       </property>
+      <!-- #endif -->
       <property>
         <name>Automatic Updates</name>
         <type>LIST</type>
@@ -42,7 +43,6 @@
         </items>
         <default>On</default>
       </property>
-      <!-- #endif -->
       <!-- #ifndef DRIVERCENTRAL -->
       <property>
         <name>Update Channel</name>

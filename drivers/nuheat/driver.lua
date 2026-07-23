@@ -44,6 +44,38 @@ local gState = {
   devices = {},
 }
 
+--- Set true once OnDriverLateInit finishes; guards the property-sync handlers
+--- from firing while Composer loads the initial property values.
+local gInitialized = false
+
+--- All nuheat account instances on this controller, sorted by device id. Used
+--- for leader election (lowest id is the leader that runs updates).
+--- @return integer[]
+local function getAccountDriverIds()
+  local drivers = C4:GetDevicesByC4iName(C4:GetDriverFileName()) or {}
+  local ids = {}
+  for id in pairs(drivers) do
+    ids[#ids + 1] = tonumber(id)
+  end
+  table.sort(ids)
+  return ids
+end
+
+--#ifndef DRIVERCENTRAL
+--- Mirror an updater property to the other account instances so they stay
+--- consistent (only the leader instance actually performs updates).
+--- @param propertyName string
+--- @param propertyValue string
+local function syncPropertyToOtherInstances(propertyName, propertyValue)
+  local myId = C4:GetDeviceID()
+  for _, deviceId in ipairs(getAccountDriverIds()) do
+    if deviceId ~= myId then
+      SetDeviceProperties(deviceId, { [propertyName] = propertyValue }, true)
+    end
+  end
+end
+--#endif
+
 -- ─── Companion handoff ─────────────────────────────────────────────────────
 
 --- Push a thermostat's current object to its bound companion (if any).
@@ -201,6 +233,19 @@ function OnDriverLateInit()
   bindings:restoreBindings()
   C4:UpdateProperty("Driver Version", C4:GetDriverConfigInfo("version"))
   login()
+  --#ifndef DRIVERCENTRAL
+  -- Auto-update: only the leader account instance checks, at most every 30 min,
+  -- and only when Automatic Updates is On. The DriverCentral build lets
+  -- cloud-client-byte own updates instead.
+  SetTimer("AutoUpdate", 30 * ONE_MINUTE, function()
+    local isLeader = Select(getAccountDriverIds(), 1) == C4:GetDeviceID()
+    if isLeader and toboolean(Properties["Automatic Updates"]) then
+      log:info("Checking for driver update (leader instance)")
+      updateDrivers()
+    end
+  end, true)
+  --#endif
+  gInitialized = true
 end
 
 -- ─── Property handlers (OPC dispatch) ──────────────────────────────────────
@@ -220,6 +265,24 @@ end
 function OPC.Password()
   login()
 end
+
+function OPC.Automatic_Updates(propertyValue)
+  --#ifndef DRIVERCENTRAL
+  if not gInitialized then
+    return
+  end
+  syncPropertyToOtherInstances("Automatic Updates", propertyValue)
+  --#endif
+end
+
+--#ifndef DRIVERCENTRAL
+function OPC.Update_Channel(propertyValue)
+  if not gInitialized then
+    return
+  end
+  syncPropertyToOtherInstances("Update Channel", propertyValue)
+end
+--#endif
 
 -- ─── Messages from a companion (RFP dispatch) ──────────────────────────────
 

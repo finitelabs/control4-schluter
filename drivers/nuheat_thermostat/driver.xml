@@ -18,12 +18,12 @@
     <script file="driver.lua" jit="1"/>
     <documentation file="www/documentation/index.html"/>
     <properties>
+      <!-- #ifdef DRIVERCENTRAL -->
       <property>
-        <name>Cloud</name>
+        <name>Cloud Settings</name>
         <type>LABEL</type>
         <default>Cloud Settings</default>
       </property>
-      <!-- #ifdef DRIVERCENTRAL -->
       <property>
         <name>Cloud Status</name>
         <default/>
