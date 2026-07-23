@@ -215,11 +215,11 @@ end
 
 -- ─── Actions ───────────────────────────────────────────────────────────────
 
-function LUA_ACTION.Refresh_Thermostats()
+function EC.Refresh_Thermostats()
   refreshThermostats()
 end
 
-function LUA_ACTION.Reset_Driver(tParams)
+function EC.Reset_Driver(tParams)
   if (tParams or {})["Are You Sure?"] == "Yes" then
     bindings:deleteAllBindings(NS)
     gState.devices = {}

@@ -1,26 +1,9 @@
 <!-- Copyright 2026 Finite Labs, LLC. All rights reserved. -->
 
-<style>
-@media print {
-   .noprint {
-      visibility: hidden;
-      display: none;
-   }
-   * {
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-    }
-}
-</style>
-
 # <span style="color:#9e2a2f">Overview</span>
-
-<!-- #ifndef DRIVERCENTRAL -->
 
 > DISCLAIMER: This software is neither affiliated with nor endorsed by either
 > Control4 or NuHeat.
-
-<!-- #endif -->
 
 The NuHeat driver connects Control4 to your NuHeat Signature WiFi floor-heating
 thermostats through the mynuheat.com cloud service. Enter your NuHeat account

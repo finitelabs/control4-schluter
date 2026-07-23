@@ -69,25 +69,23 @@ function NuHeatClient:authenticate(email, password)
   local d = deferred.new()
   local body = JSON:encode({ Email = email, Password = password, Confirm = password })
 
-  http:post(BASE_URL .. "/api/authenticate/user", body, HEADERS)
-    :next(function(response)
-      local object, err = _decode(response.body)
-      if not object then
-        return d:reject({ errorCode = -1, message = err })
-      end
-      if object.ErrorCode == 0 and object.SessionId and object.SessionId ~= "" then
-        return d:resolve(object.SessionId)
-      end
-      -- ErrorCode 1/2 = invalid username/password; anything else = other failure.
-      d:reject({
-        errorCode = object.ErrorCode,
-        message = (object.ErrorCode == 1 or object.ErrorCode == 2)
-            and "Invalid username or password"
-          or ("Authentication failed (ErrorCode " .. tostring(object.ErrorCode) .. ")"),
-      })
-    end, function(errorResponse)
-      d:reject({ errorCode = -1, message = "authenticate request failed" })
-    end)
+  http:post(BASE_URL .. "/api/authenticate/user", body, HEADERS):next(function(response)
+    local object, err = _decode(response.body)
+    if not object then
+      return d:reject({ errorCode = -1, message = err })
+    end
+    if object.ErrorCode == 0 and object.SessionId and object.SessionId ~= "" then
+      return d:resolve(object.SessionId)
+    end
+    -- ErrorCode 1/2 = invalid username/password; anything else = other failure.
+    d:reject({
+      errorCode = object.ErrorCode,
+      message = (object.ErrorCode == 1 or object.ErrorCode == 2) and "Invalid username or password"
+        or ("Authentication failed (ErrorCode " .. tostring(object.ErrorCode) .. ")"),
+    })
+  end, function(errorResponse)
+    d:reject({ errorCode = -1, message = "authenticate request failed" })
+  end)
 
   return d
 end
@@ -106,9 +104,7 @@ end
 --- @return Deferred<table, any>
 function NuHeatClient:getThermostat(sessionId, serialNumber)
   log:trace("NuHeatClient:getThermostat(%s)", serialNumber)
-  return self:_getJson(
-    "/api/thermostat" .. _query({ sessionid = sessionId, serialnumber = serialNumber })
-  )
+  return self:_getJson("/api/thermostat" .. _query({ sessionid = sessionId, serialnumber = serialNumber }))
 end
 
 --- Push settings to a thermostat (setpoint, mode, hold, schedule).
@@ -119,20 +115,17 @@ end
 function NuHeatClient:setThermostat(sessionId, serialNumber, settings)
   log:trace("NuHeatClient:setThermostat(%s)", serialNumber)
   local d = deferred.new()
-  local url = BASE_URL
-    .. "/api/thermostat"
-    .. _query({ sessionid = sessionId, serialnumber = serialNumber })
+  local url = BASE_URL .. "/api/thermostat" .. _query({ sessionid = sessionId, serialnumber = serialNumber })
 
-  http:post(url, JSON:encode(settings), HEADERS)
-    :next(function(response)
-      local object, err = _decode(response.body)
-      if not object then
-        return d:reject(err)
-      end
-      d:resolve(object)
-    end, function()
-      d:reject("setThermostat request failed")
-    end)
+  http:post(url, JSON:encode(settings), HEADERS):next(function(response)
+    local object, err = _decode(response.body)
+    if not object then
+      return d:reject(err)
+    end
+    d:resolve(object)
+  end, function()
+    d:reject("setThermostat request failed")
+  end)
 
   return d
 end
@@ -157,16 +150,15 @@ end
 --- @return Deferred<table, any>
 function NuHeatClient:_getJson(path, options)
   local d = deferred.new()
-  http:get(BASE_URL .. path, HEADERS, options)
-    :next(function(response)
-      local object, err = _decode(response.body)
-      if not object then
-        return d:reject(err)
-      end
-      d:resolve(object)
-    end, function()
-      d:reject("GET " .. path .. " failed")
-    end)
+  http:get(BASE_URL .. path, HEADERS, options):next(function(response)
+    local object, err = _decode(response.body)
+    if not object then
+      return d:reject(err)
+    end
+    d:resolve(object)
+  end, function()
+    d:reject("GET " .. path .. " failed")
+  end)
   return d
 end
 

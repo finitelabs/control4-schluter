@@ -81,7 +81,8 @@ Copier will show diffs for any files that changed and let you resolve conflicts.
 It tracks which template version you're on via the `.copier-answers.yml` file
 (committed to the repo).
 
-To update shared code for **all** driver repos, run the same command in each one.
+To update shared code for **all** driver repos, run the same command in each
+one.
 
 ## Build System
 
@@ -92,8 +93,10 @@ local `.venv`) plus a few standalone binaries — no Node/npm.
 
 - Python 3.9+ (docs, formatters, preprocess, and driverpackager)
 - [LuaJIT](https://luajit.org/) (`brew install luajit`) — for squish and tests
-- [stylua](https://github.com/JohnnyMorganz/StyLua) (`brew install stylua`) — Lua formatter
-- [Pango](https://gtk.org/) (`brew install pango`) — WeasyPrint's PDF rendering engine
+- [stylua](https://github.com/JohnnyMorganz/StyLua) (`brew install stylua`) —
+  Lua formatter
+- [Pango](https://gtk.org/) (`brew install pango`) — WeasyPrint's PDF rendering
+  engine
 
 `make init` creates the `.venv` and installs the Python dependencies
 (WeasyPrint, markdown-it-py, Pygments, mdformat, black, and the driverpackager's
@@ -113,12 +116,12 @@ make clean-all     # Remove everything (build artifacts, deps, venv)
 ### Build Pipeline
 
 1. **Format** — stylua (Lua), black (Python), mdformat (Markdown)
-2. **Preprocess** — resolve `#ifdef`/`#ifndef` directives per distribution
-3. **Generate squishy** — create squish manifests from .c4zproj files
-4. **Update driver.xml** — stamp version date and modified timestamp
-5. **Generate docs** — Markdown → HTML → PDF, plus README
-6. **Package** — run driverpackager to create .c4z files
-7. **Zip** — bundle .c4z and .pdf files per distribution
+1. **Preprocess** — resolve `#ifdef`/`#ifndef` directives per distribution
+1. **Generate squishy** — create squish manifests from .c4zproj files
+1. **Update driver.xml** — stamp version date and modified timestamp
+1. **Generate docs** — Markdown → HTML → PDF, plus README
+1. **Package** — run driverpackager to create .c4z files
+1. **Zip** — bundle .c4z and .pdf files per distribution
 
 ### Distributions
 
@@ -130,8 +133,8 @@ distribution-specific code paths controlled by `#ifdef` directives (e.g.,
 
 ## Preprocessor Directives
 
-The `tools/preprocess.py` script supports C-style conditional compilation in Lua,
-XML, and Markdown:
+The `tools/preprocess.py` script supports C-style conditional compilation in
+Lua, XML, and Markdown:
 
 ```lua
 --#ifdef DRIVERCENTRAL

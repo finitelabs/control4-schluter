@@ -55,9 +55,9 @@ single setpoint, temperature range) to the device it is given.
 # <span style="color:#9e2a2f">Installer Setup</span>
 
 1. Add and log in to the **NuHeat** account driver first.
-2. Add a **NuHeat Thermostat** driver for each thermostat.
-3. Bind each thermostat driver's **NuHeat Thermostat** connection to the matching
-   connection on the NuHeat account driver.
+1. Add a **NuHeat Thermostat** driver for each thermostat.
+1. Bind each thermostat driver's **NuHeat Thermostat** connection to the
+   matching connection on the NuHeat account driver.
 
 The **Serial ID** property shows which NuHeat thermostat a driver is bound to.
 
