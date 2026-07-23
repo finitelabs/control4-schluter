@@ -7,6 +7,17 @@ local M = {}
 --- for now; promote to a Composer property when the oauth backend goes live.
 M.API_MODE = "legacy"
 
+--- Brand config for the legacy backend. NuHeat Signature and Schluter DITRA-HEAT
+--- are sibling brands on the same OJ Electronics cloud: identical REST endpoints,
+--- scoped by the `Application` id sent at login. Selected by the account driver's
+--- "Brand" property.
+M.BRANDS = {
+  ["NuHeat"] = { host = "https://www.mynuheat.com", application = nil },
+  ["Schluter"] = { host = "https://ditra-heat-e-wifi.schluter.com", application = 7 },
+}
+--- Fallback when the Brand property is unset/unknown.
+M.DEFAULT_BRAND = "NuHeat"
+
 --- C4:SetPropertyAttribs values used by lib.values / lib.utils for runtime
 --- property visibility.
 M.SHOW_PROPERTY = 0

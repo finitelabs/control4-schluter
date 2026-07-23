@@ -115,8 +115,12 @@ function Client:_ensureToken()
   local d = deferred.new()
   local headers = { ["Content-Type"] = "application/x-www-form-urlencoded" }
   http:post(TOKEN_URL, self:_encodeForm(form), headers):next(function(response)
-    local ok, token = pcall(JSON.decode, JSON, response.body)
-    if not ok or type(token) ~= "table" or not token.access_token then
+    local token = response.body
+    if type(token) ~= "table" then
+      local ok, decoded = pcall(JSON.decode, JSON, token)
+      token = ok and decoded or nil
+    end
+    if type(token) ~= "table" or not token.access_token then
       return d:reject({ errorCode = -1, message = "token request returned no access_token" })
     end
     self._accessToken = token.access_token
@@ -284,10 +288,15 @@ end
 --- @param form table<string, string>
 --- @return string
 function Client:_encodeForm(form)
+  local function enc(s)
+    return (tostring(s):gsub("[^%w%-_%.~]", function(c)
+      return string.format("%%%02X", string.byte(c))
+    end))
+  end
   local parts = {}
   for k, v in pairs(form) do
     if v ~= nil then
-      parts[#parts + 1] = tostring(k) .. "=" .. C4:URLEncode(tostring(v))
+      parts[#parts + 1] = tostring(k) .. "=" .. enc(v)
     end
   end
   return table.concat(parts, "&")
@@ -308,6 +317,11 @@ function Client:_request(method, path, body)
       ["Accept"] = "application/json",
     }
     local onOk = function(response)
+      -- lib.http already decodes JSON responses into a table; accept that, and
+      -- only decode when the body is still a raw string.
+      if type(response.body) == "table" then
+        return d:resolve(response.body)
+      end
       if response.body == nil or response.body == "" then
         return d:resolve({})
       end

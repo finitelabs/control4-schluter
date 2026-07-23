@@ -84,7 +84,8 @@ end
 --- @return NuHeatState
 function M.fromDevice(object)
   local v = object.Thermostat or object
-  local scheduleMode = tonumber(v.ScheduleMode)
+  -- Schluter uses RegulationMode; NuHeat uses ScheduleMode (same 1/2/3 enum).
+  local scheduleMode = tonumber(v.RegulationMode or v.ScheduleMode)
   local setpoint = tonumber(v.SetPointTemp)
   return {
     serialNumber = tostring(v.SerialNumber),

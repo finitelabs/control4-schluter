@@ -21,7 +21,9 @@ local http = require("lib.http")
 local log = require("lib.logging")
 local JSON = require("JSON")
 
-local BASE_URL = "https://www.mynuheat.com"
+--- Default host (NuHeat). Schluter DITRA-HEAT uses the same API on a different
+--- host + Application id; both are configured via new({ host, applicationId }).
+local DEFAULT_HOST = "https://www.mynuheat.com"
 local HEADERS = { ["Content-Type"] = "application/json; charset=utf-8" }
 -- The notification endpoint long-polls: the server holds the request open until
 -- a change occurs or the timeout elapses. Give it well over the ~5 min the old
@@ -36,10 +38,26 @@ local NOTIFY_TIMEOUT_S = 330
 local Client = {}
 Client.__index = Client
 
---- @param _config table|nil Unused for the legacy backend.
+--- @param config table|nil { host?: string, applicationId?: number } — brand host
+--- and OJ Application id (Schluter=7; NuHeat omits it).
 --- @return NuHeatLegacyClient
-function Client:new(_config)
-  return setmetatable({ _sessionId = nil }, self)
+function Client:new(config)
+  config = config or {}
+  return setmetatable({
+    _sessionId = nil,
+    _host = config.host or DEFAULT_HOST,
+    _applicationId = config.applicationId,
+  }, self)
+end
+
+--- Percent-encode a string (RFC 3986 unreserved set). Self-contained because
+--- C4:URLEncode is not present on all controller OS versions.
+--- @param s string|number
+--- @return string
+local function _urlEncode(s)
+  return (tostring(s):gsub("[^%w%-_%.~]", function(c)
+    return string.format("%%%02X", string.byte(c))
+  end))
 end
 
 --- Build a `?a=b&c=d` query string from a table (values URL-encoded).
@@ -48,15 +66,20 @@ end
 local function _query(params)
   local parts = {}
   for k, v in pairs(params) do
-    parts[#parts + 1] = tostring(k) .. "=" .. C4:URLEncode(tostring(v))
+    parts[#parts + 1] = tostring(k) .. "=" .. _urlEncode(v)
   end
   return "?" .. table.concat(parts, "&")
 end
 
---- Decode a JSON response body, returning nil + error on malformed JSON.
---- @param body string
+--- Coerce a response body to a decoded table. lib.http (via drivers-common-public
+--- url) already parses JSON responses into a table, so accept that directly and
+--- only decode when the body is still a raw string.
+--- @param body string|table
 --- @return table|nil decoded, string|nil error
 local function _decode(body)
+  if type(body) == "table" then
+    return body, nil
+  end
   local ok, decoded = pcall(JSON.decode, JSON, body)
   if not ok or type(decoded) ~= "table" then
     return nil, "malformed JSON response"
@@ -73,9 +96,14 @@ end
 function Client:authenticate(email, password)
   log:trace("legacy:authenticate(%s)", email)
   local d = deferred.new()
-  local body = JSON:encode({ Email = email, Password = password, Confirm = password })
+  -- Confirm is used by NuHeat; Application scopes the OJ tenant (Schluter=7).
+  local payload = { Email = email, Password = password, Confirm = password }
+  if self._applicationId ~= nil then
+    payload.Application = self._applicationId
+  end
+  local body = JSON:encode(payload)
 
-  http:post(BASE_URL .. "/api/authenticate/user", body, HEADERS):next(function(response)
+  http:post(self._host .. "/api/authenticate/user", body, HEADERS):next(function(response)
     local object, err = _decode(response.body)
     if not object then
       return d:reject({ errorCode = -1, message = err })
@@ -117,7 +145,17 @@ end
 function Client:getThermostats()
   log:trace("legacy:getThermostats()")
   return self:_getJson("/api/thermostats" .. _query({ sessionid = self._sessionId })):next(function(result)
-    -- Normalize to a bare array of thermostat objects.
+    -- Normalize to a bare array of thermostat objects. NuHeat returns
+    -- `Thermostats`; Schluter wraps them in `Groups[].Thermostats`.
+    if type(result.Groups) == "table" then
+      local list = {}
+      for _, group in ipairs(result.Groups) do
+        for _, t in ipairs(group.Thermostats or {}) do
+          list[#list + 1] = t
+        end
+      end
+      return list
+    end
     return result.Thermostats or result
   end)
 end
@@ -142,7 +180,7 @@ end
 function Client:setThermostat(serialNumber, settings)
   log:trace("legacy:setThermostat(%s)", serialNumber)
   local d = deferred.new()
-  local url = BASE_URL .. "/api/thermostat" .. _query({ sessionid = self._sessionId, serialnumber = serialNumber })
+  local url = self._host .. "/api/thermostat" .. _query({ sessionid = self._sessionId, serialnumber = serialNumber })
 
   http:post(url, JSON:encode(settings), HEADERS):next(function(response)
     local object, err = _decode(response.body)
@@ -208,7 +246,7 @@ end
 --- @return Deferred<table, any>
 function Client:_getJson(path, options)
   local d = deferred.new()
-  http:get(BASE_URL .. path, HEADERS, options):next(function(response)
+  http:get(self._host .. path, HEADERS, options):next(function(response)
     local object, err = _decode(response.body)
     if not object then
       return d:reject(err)

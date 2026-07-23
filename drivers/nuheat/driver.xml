@@ -60,6 +60,15 @@
         <default>NuHeat Account</default>
       </property>
       <property>
+        <name>Brand</name>
+        <type>LIST</type>
+        <default>NuHeat</default>
+        <items>
+          <item>NuHeat</item>
+          <item>Schluter</item>
+        </items>
+      </property>
+      <property>
         <name>Email</name>
         <type>STRING</type>
         <default/>

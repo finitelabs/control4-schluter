@@ -33,8 +33,16 @@ local NS = constants.BINDING_NAMESPACE
 local CMD = constants.CMD
 
 -- The backend (legacy mynuheat.com or official OAuth) owns its own session; the
--- driver is backend-agnostic and only speaks the NuHeatClient contract.
-local client = clientFactory.create(constants.API_MODE)
+-- driver is backend-agnostic and only speaks the NuHeatClient contract. The
+-- legacy backend is brand-configurable (NuHeat / Schluter — same OJ API).
+--- @type table
+local client
+
+--- Build the client for the currently-selected Brand.
+local function rebuildClient()
+  local brand = constants.BRANDS[Properties["Brand"]] or constants.BRANDS[constants.DEFAULT_BRAND]
+  client = clientFactory.create(constants.API_MODE, { host = brand.host, applicationId = brand.application })
+end
 
 --- Runtime state (not persisted; rebuilt on login).
 local gState = {
@@ -224,6 +232,7 @@ function OnDriverInit()
   log:setLogLevel(Properties["Log Level"])
   log:setLogMode(Properties["Log Mode"])
   log:trace("OnDriverInit()")
+  rebuildClient()
 end
 
 function OnDriverLateInit()
@@ -254,6 +263,18 @@ end
 
 function OPC.Log_Mode(propertyValue)
   log:setLogMode(propertyValue)
+end
+
+--- Switch brand (NuHeat / Schluter): rebuild the client for the new host +
+--- Application id and re-login.
+function OPC.Brand()
+  bindings:deleteAllBindings(NS)
+  gState.devices = {}
+  if client then
+    client:logout()
+  end
+  rebuildClient()
+  login()
 end
 
 function OPC.Email()
