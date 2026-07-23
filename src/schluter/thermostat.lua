@@ -196,47 +196,20 @@ end
 -- ─── Schedule model (Control4 thermostatV2 ⇄ Schluter Schedules[]) ────────────
 --
 -- Schluter `device.Schedules` is a 7-element array indexed by Schluter day
--- (1=Mon .. 7=Sun). Each entry = `{ WeekDayGrpNo, Events[1..4] }`, each event =
+-- (1=Mon .. 7=Sun). Each entry = `{ WeekDayGrpNo, Events[1..6] }`, each event =
 -- `{ Clock "HH:MM:SS", ScheduleType, TempFloor (°C×100), Active }`. Days sharing
 -- a `WeekDayGrpNo` share one program, so editing one propagates to the whole
 -- group — matching the Schluter thermostat's own grouping behavior (and the old
 -- driver). Control4's thermostatV2 schedule is per-day (DayIndex 0=Sun .. 6=Sat)
--- with EntryIndex 0..3 (Wake/Leave/Return/Sleep). Heat-only, so cool is unused.
+-- with EntryIndex 0..5, mapped 1:1 to the device's 6 events. Heat-only.
 
 --- Schluter schedule array index (1=Mon..7=Sun) -> C4 DayIndex (0=Sun..6=Sat).
 M.SCHLUTER_TO_C4_DAY = { 1, 2, 3, 4, 5, 6, 0 }
 --- C4 DayIndex (0=Sun..6=Sat) -> Schluter schedule array index (1=Mon..7=Sun).
 M.C4_TO_SCHLUTER_DAY = { [0] = 7, [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 5, [6] = 6 }
---- Events per day in the Schluter DITRA-HEAT schedule (device side).
+--- Events per day in the Schluter DITRA-HEAT schedule; the proxy exposes the same
+--- number of schedule slots (declared in driver.xml schedule_default).
 M.SCHEDULE_ENTRIES_PER_DAY = 6
---- Schedule slots the Control4 thermostatV2 proxy exposes per day. The proxy is
---- fixed at 4 (Wake/Leave/Return/Sleep); the device can carry up to 6 events, so
---- we surface the 4 most relevant — see M.scheduleSlots.
-M.C4_SCHEDULE_SLOTS = 4
-
---- Choose which of a day's device events map into Control4's fixed 4 schedule
---- slots. The device may have up to 6 events/day but Control4 only has 4, so we
---- prefer the enabled (active) events, then fill with disabled ones, capped at 4
---- and kept in time order. Both read (scheduleEntries) and write
---- (applyScheduleEntry) use this so a C4 slot always refers to the same event.
---- @param schedule table A day schedule with `Events[]`.
---- @return integer[] eventIndices 1-based device-event indices, one per C4 slot.
-function M.scheduleSlots(schedule)
-  local events = (schedule or {}).Events or {}
-  local picked = {}
-  for i, e in ipairs(events) do
-    if e.Active and #picked < M.C4_SCHEDULE_SLOTS then
-      picked[#picked + 1] = i
-    end
-  end
-  for i, e in ipairs(events) do
-    if not e.Active and #picked < M.C4_SCHEDULE_SLOTS then
-      picked[#picked + 1] = i
-    end
-  end
-  table.sort(picked)
-  return picked
-end
 
 --- Parse "HH:MM:SS" (or "HH:MM") into minutes since midnight.
 --- @param clock string
@@ -270,12 +243,11 @@ function M.scheduleEntries(device)
   for schluterDay, schedule in ipairs(schedules) do
     local c4Day = M.SCHLUTER_TO_C4_DAY[schluterDay]
     if c4Day ~= nil and type(schedule.Events) == "table" then
-      -- Map the device's events into C4's 4 slots (prefer active events).
-      for slot, eventIndex in ipairs(M.scheduleSlots(schedule)) do
-        local event = schedule.Events[eventIndex]
+      -- Schluter has 6 events/day, mapped 1:1 to the proxy's 6 schedule slots.
+      for entryIndex, event in ipairs(schedule.Events) do
         rows[#rows + 1] = {
           c4Day = c4Day,
-          entryIndex = slot - 1,
+          entryIndex = entryIndex - 1,
           minutes = M.clockToMinutes(event.Clock),
           active = event.Active == true,
           tempC = M.schluterToC(event.TempFloor),
@@ -308,10 +280,8 @@ function M.applyScheduleEntry(device, c4Day, entryIndex, minutes, active, tempC)
   local tempFloor = M.cToSchluter(tempC)
   for day, schedule in ipairs(schedules) do
     if schedule.WeekDayGrpNo == group and type(schedule.Events) == "table" then
-      -- Map the C4 slot back to the device event it represents (same mapping
-      -- read uses), so edits target the event the user sees.
-      local eventIndex = M.scheduleSlots(schedule)[entryIndex + 1]
-      local event = eventIndex and schedule.Events[eventIndex]
+      -- C4 slot index maps 1:1 to the device event.
+      local event = schedule.Events[entryIndex + 1]
       if event then
         event.Clock = clock
         event.TempFloor = tempFloor
