@@ -158,7 +158,16 @@ local function heatSetpointToC(value, scale)
   if n == nil then
     return nil
   end
-  if tostring(scale or "F"):upper():sub(1, 1) == "C" then
+  local s = tostring(scale or ""):upper():sub(1, 1)
+  if s == "C" then
+    return n
+  end
+  if s == "F" then
+    return model.fToC(n)
+  end
+  -- No explicit scale: the device range is 5-40 °C / 41-104 °F (non-overlapping),
+  -- so infer from magnitude — a setpoint > 40 must be Fahrenheit.
+  if n <= 40 then
     return n
   end
   return model.fToC(n)
@@ -246,9 +255,11 @@ end
 
 --- Edit one or more schedule entries. Applies each to the device (propagating
 --- across the Schluter day-group), notifies the proxy of every affected day, and
---- writes the mutated schedule back through the account.
-function RFP.SCHEDULE_ENTRY(idBinding, strCommand, tParams)
-  log:trace("RFP.SCHEDULE_ENTRY(%s)", idBinding)
+--- writes the mutated schedule back through the account. The thermostatV2 proxy
+--- sends this as UPDATE_SCHEDULE_ENTRIES (with an ENTRIES XML blob of
+--- <ScheduleEntryUpdate .../> elements).
+function RFP.UPDATE_SCHEDULE_ENTRIES(idBinding, strCommand, tParams)
+  log:trace("RFP.UPDATE_SCHEDULE_ENTRIES(%s)", idBinding)
   if idBinding ~= PROXY_BINDING or not gDevice then
     return
   end
@@ -272,6 +283,9 @@ function RFP.SCHEDULE_ENTRY(idBinding, strCommand, tParams)
     pushToAccount()
   end
 end
+
+--- Alias: some proxy/OS versions send the singular command name.
+RFP.SCHEDULE_ENTRY = RFP.UPDATE_SCHEDULE_ENTRIES
 
 -- ─── Account handoff handlers (account → this companion) ────────────────────
 
