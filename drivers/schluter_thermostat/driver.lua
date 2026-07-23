@@ -269,25 +269,29 @@ function RFP.UPDATE_SCHEDULE_ENTRIES(idBinding, strCommand, tParams)
   if idBinding ~= PROXY_BINDING or not gDevice then
     return
   end
-  local changed = false
+  local affectedDays = {}
   for _, e in ipairs(parseScheduleEntries(tParams)) do
     if e.day ~= nil and e.entry ~= nil and e.tempC ~= nil then
       local affected = model.applyScheduleEntry(gDevice, e.day, e.entry, e.minutes or 0, e.enabled, e.tempC)
       for _, c4Day in ipairs(affected) do
-        pushScheduleEntry({
-          c4Day = c4Day,
-          entryIndex = e.entry,
-          minutes = e.minutes or 0,
-          active = e.enabled,
-          tempC = e.tempC,
-        })
-        changed = true
+        affectedDays[c4Day] = true
       end
     end
   end
-  if changed then
-    pushToAccount()
+  if next(affectedDays) == nil then
+    return
   end
+  -- Keep each day's six events ordered by time (renumbering ScheduleType) so an
+  -- edit always maps back to the correct Schluter event, then re-push every
+  -- affected day in full so the C4 editor reflects the sorted order.
+  model.normalizeSchedule(gDevice)
+  gScheduleJson = nil
+  for _, row in ipairs(model.scheduleEntries(gDevice)) do
+    if affectedDays[row.c4Day] then
+      pushScheduleEntry(row)
+    end
+  end
+  pushToAccount()
 end
 
 --- Alias: some proxy/OS versions send the singular command name.

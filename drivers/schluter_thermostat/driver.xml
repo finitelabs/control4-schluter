@@ -126,12 +126,12 @@
     <scheduling>True</scheduling>
     <schedule_default Entries="6" DefaultHeat="278" DefaultCool="50">
       <schedule_day_info Entries="6" DefaultHeat="278" DefaultCool="50">
-        <schedule_entry Name="Wake" Time="360" Enabled="True" Heat="278" Cool="0" />
-        <schedule_entry Name="Leave" Time="480" Enabled="True" Heat="233" Cool="0" />
-        <schedule_entry Name="Custom 1" Time="720" Enabled="False" Heat="278" Cool="0" />
-        <schedule_entry Name="Custom 2" Time="900" Enabled="False" Heat="233" Cool="0" />
-        <schedule_entry Name="Return" Time="1020" Enabled="True" Heat="278" Cool="0" />
-        <schedule_entry Name="Sleep" Time="1320" Enabled="True" Heat="233" Cool="0" />
+        <schedule_entry Name="Event 1" Time="360" Enabled="True" Heat="278" Cool="0" />
+        <schedule_entry Name="Event 2" Time="540" Enabled="True" Heat="233" Cool="0" />
+        <schedule_entry Name="Event 3" Time="720" Enabled="False" Heat="278" Cool="0" />
+        <schedule_entry Name="Event 4" Time="780" Enabled="False" Heat="233" Cool="0" />
+        <schedule_entry Name="Event 5" Time="1020" Enabled="True" Heat="278" Cool="0" />
+        <schedule_entry Name="Event 6" Time="1380" Enabled="True" Heat="233" Cool="0" />
       </schedule_day_info>
     </schedule_default>
     <schedule_entry />

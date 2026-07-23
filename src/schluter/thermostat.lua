@@ -296,4 +296,27 @@ function M.applyScheduleEntry(device, c4Day, entryIndex, minutes, active, tempC)
   return affected
 end
 
+--- Re-sort every day's events by clock (ascending) and renumber each event's
+--- ScheduleType to its new position (0-based). The Schluter device stores the six
+--- daily events in time order with ScheduleType == index; after a Control4 edit
+--- changes an event's time, this restores that invariant so events always map
+--- back to the device by time. Mutates `device.Schedules` in place.
+--- @param device table
+function M.normalizeSchedule(device)
+  local schedules = (device or {}).Schedules
+  if type(schedules) ~= "table" then
+    return
+  end
+  for _, schedule in ipairs(schedules) do
+    if type(schedule.Events) == "table" then
+      table.sort(schedule.Events, function(a, b)
+        return M.clockToMinutes(a.Clock) < M.clockToMinutes(b.Clock)
+      end)
+      for i, event in ipairs(schedule.Events) do
+        event.ScheduleType = i - 1
+      end
+    end
+  end
+end
+
 return M
