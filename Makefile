@@ -1,9 +1,6 @@
 # Control4 Driver Build System
 # Run `make help` for available targets.
 
-# TODO: add 'drivercentral' back once a DriverCentral product id (DC_PID) is
-# assigned for these drivers. The DriverCentral #ifdef blocks are already in the
-# source, so releasing to DC is just re-adding it here + setting DC_PID.
 DISTRIBUTIONS := oss
 README_DRIVER := nuheat
 README_BUILD  := oss
