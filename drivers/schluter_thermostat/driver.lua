@@ -149,33 +149,10 @@ local function pushSchedule()
   end
 end
 
---- Convert a heat setpoint in the entry's scale to °C.
---- @param value any
---- @param scale any "C"/"F" (defaults to F)
---- @return number|nil
-local function heatSetpointToC(value, scale)
-  local n = tonumber(value)
-  if n == nil then
-    return nil
-  end
-  local s = tostring(scale or ""):upper():sub(1, 1)
-  if s == "C" then
-    return n
-  end
-  if s == "F" then
-    return model.fToC(n)
-  end
-  -- No explicit scale: the device range is 5-40 °C / 41-104 °F (non-overlapping),
-  -- so infer from magnitude — a setpoint > 40 must be Fahrenheit.
-  if n <= 40 then
-    return n
-  end
-  return model.fToC(n)
-end
-
---- Parse a SCHEDULE_ENTRY command into edit rows. The thermostatV2 proxy sends
---- either flat params (DAY_INDEX/ENTRY_INDEX/...) or an ENTRIES XML blob of
---- <ScheduleEntryUpdate .../> elements; support both.
+--- Parse an UPDATE_SCHEDULE_ENTRIES command into edit rows. The thermostatV2
+--- proxy sends an ENTRIES XML blob of <ScheduleEntryUpdate .../> elements (and,
+--- on some versions, flat params). Setpoints arrive in Control4's canonical unit
+--- (decikelvin), so convert with model.c4ToC.
 --- @param tParams table
 --- @return table[] edits Each `{ day, entry, minutes, enabled, tempC }`.
 local function parseScheduleEntries(tParams)
@@ -192,7 +169,7 @@ local function parseScheduleEntries(tParams)
         entry = tonumber(attr("EntryIndex")),
         minutes = tonumber(attr("EntryTime")),
         enabled = tostring(attr("IsEnabled")):lower() == "true",
-        tempC = heatSetpointToC(attr("HeatSetpoint"), attr("Scale") or tParams.SCALE),
+        tempC = model.c4ToC(attr("HeatSetpoint")),
       }
     end
   elseif tParams.DAY_INDEX ~= nil then
@@ -201,7 +178,7 @@ local function parseScheduleEntries(tParams)
       entry = tonumber(tParams.ENTRY_INDEX),
       minutes = tonumber(tParams.ENTRY_TIME),
       enabled = toboolean(tParams.ENABLED),
-      tempC = heatSetpointToC(tParams.HEAT_SETPOINT, tParams.SCALE),
+      tempC = model.c4ToC(tParams.HEAT_SETPOINT),
     }
   end
   return edits

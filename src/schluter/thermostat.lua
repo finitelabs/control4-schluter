@@ -43,6 +43,28 @@ function M.fToC(f)
   return (f - 32) * 5 / 9
 end
 
+--- Control4's canonical temperature unit is decikelvin: (°C + 273.15) × 10.
+--- The thermostatV2 proxy sends schedule-entry setpoints in this unit.
+M.KELVIN_OFFSET = 273.15
+
+--- Convert a Control4 canonical temperature (decikelvin) to Celsius.
+--- @param value number
+--- @return number|nil celsius
+function M.c4ToC(value)
+  local n = tonumber(value)
+  if n == nil then
+    return nil
+  end
+  return n / 10 - M.KELVIN_OFFSET
+end
+
+--- Convert Celsius to Control4 canonical temperature (decikelvin).
+--- @param c number
+--- @return number decikelvin
+function M.cToC4(c)
+  return M.round((tonumber(c) + M.KELVIN_OFFSET) * 10)
+end
+
 --- Round half-up to `idp` decimal places (default 0).
 --- @param num number
 --- @param idp integer|nil
