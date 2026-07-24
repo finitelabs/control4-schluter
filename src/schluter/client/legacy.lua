@@ -187,7 +187,23 @@ function Client:setThermostat(serialNumber, settings)
     if not object then
       return d:reject(err)
     end
-    d:resolve(object.Thermostat or object)
+    if object.Success == false then
+      return d:reject("setThermostat rejected by server")
+    end
+    -- Schluter's POST replies with just `{"Success":true}` — not the device. If
+    -- a device object came back (some backends do), use it; otherwise re-fetch
+    -- the authoritative device so callers get the real post-write state (e.g.
+    -- Manual mode derives SetPointTemp from ManualTemperature). Handing the bare
+    -- `{Success=true}` object to fromDevice() would crash on nil fields.
+    if type(object.Thermostat) == "table" or object.SerialNumber ~= nil then
+      d:resolve(object.Thermostat or object)
+    else
+      self:getThermostat(serialNumber):next(function(device)
+        d:resolve(device)
+      end, function(fetchErr)
+        d:reject(fetchErr)
+      end)
+    end
   end, function(errorResponse)
     local detail = type(errorResponse) == "table" and errorResponse.error or errorResponse
     d:reject("setThermostat request failed: " .. tostring(detail))

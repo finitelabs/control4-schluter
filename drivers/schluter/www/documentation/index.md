@@ -13,7 +13,7 @@
 }
 </style>
 
-<img alt="Schluter" src="./images/header.png" width="500"/>
+<img alt="Schluter" src="./images/header.png" width="275"/>
 
 ______________________________________________________________________
 

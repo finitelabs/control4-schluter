@@ -24,9 +24,13 @@ M.SETPOINT_EPSILON_C = 0.28
 -- ─── Temperature conversion ────────────────────────────────────────────────
 
 --- @param n number Schluter wire value (°C × 100)
---- @return number celsius
+--- @return number|nil celsius
 function M.schluterToC(n)
-  return tonumber(n) / SCHLUTER_SCALE
+  local v = tonumber(n)
+  if v == nil then
+    return nil
+  end
+  return v / SCHLUTER_SCALE
 end
 
 --- @param c number Celsius
@@ -166,14 +170,17 @@ function M.hvacMode(state)
   return state.isOff and "Off" or "Heat"
 end
 
---- C4 hold mode from device state: Until is a temporary hold ("Hold Until"), a
---- Permanent regulation that is not the Away/Off sentinel is a permanent hold,
---- and Auto (following the schedule) or Away is no hold ("Off").
+--- The C4 hold modes this driver advertises, mapped to Schluter's RegulationMode.
+--- Schluter's Comfort (2) is a temporary hold until the next scheduled change
+--- ("Until Next"); Manual (3) is a permanent hold; Auto (1)/Away is no hold.
+M.HOLD_MODES = "Off,Until Next,Permanent"
+
+--- C4 hold mode from device state.
 --- @param state SchluterState
 --- @return string
 function M.holdMode(state)
   if state.scheduleMode == M.MODE.UNTIL then
-    return "Hold Until"
+    return "Until Next"
   elseif state.scheduleMode == M.MODE.PERMANENT and not state.isOff then
     return "Permanent"
   end
@@ -200,39 +207,112 @@ local function setMode(settings, mode)
   settings.ScheduleMode = mode
 end
 
---- Set the heat setpoint (°C). Puts the thermostat into a temporary "Until"
---- hold unless it is already in an Until/Permanent hold.
+--- Write the held setpoint onto the field the given mode actually reads: Manual
+--- (permanent) regulates to ManualTemperature, Comfort (temporary) regulates to
+--- ComfortTemperature. SetPointTemp is set too (it mirrors the active setpoint).
+--- @param settings table
+--- @param schluter number setpoint in Schluter units (°C×100)
+--- @param mode integer
+local function setHeldTemp(settings, schluter, mode)
+  settings.SetPointTemp = schluter
+  if mode == M.MODE.PERMANENT then
+    settings.ManualTemperature = schluter
+  elseif mode == M.MODE.UNTIL then
+    settings.ComfortTemperature = schluter
+  end
+end
+
+--- Set the heat setpoint (°C). Enters a temporary Comfort hold until the next
+--- scheduled change, unless the thermostat is already in a permanent (Manual)
+--- hold — in which case the permanent hold is kept at the new temperature.
 --- @param settings table Current Schluter settings object (mutated + returned).
 --- @param celsius number
+--- @param comfortEndTime string|nil Schluter datetime for the Comfort hold end.
 --- @return table settings
-function M.applySetpoint(settings, celsius)
-  settings.SetPointTemp = M.cToSchluter(M.normalize(celsius))
-  local mode = M.currentMode(settings)
-  if mode ~= M.MODE.UNTIL and mode ~= M.MODE.PERMANENT then
-    setMode(settings, M.MODE.UNTIL)
+function M.applySetpoint(settings, celsius, comfortEndTime)
+  local schluter = M.cToSchluter(M.normalize(celsius))
+  local mode = M.currentMode(settings) == M.MODE.PERMANENT and M.MODE.PERMANENT or M.MODE.UNTIL
+  setHeldTemp(settings, schluter, mode)
+  if mode == M.MODE.UNTIL and comfortEndTime then
+    settings.ComfortEndTime = comfortEndTime
   end
+  setMode(settings, mode)
   return settings
 end
 
 --- C4 hold-mode string -> regulation mode. "Off" resumes the schedule (Auto);
---- the timed/until holds map to Until; Permanent maps to Permanent.
+--- "Until Next" is a temporary Comfort hold; "Permanent" is a Manual hold.
 M.HOLD_TO_MODE = {
   ["Off"] = M.MODE.AUTO,
-  ["2 Hours"] = M.MODE.UNTIL,
-  ["Hold Until"] = M.MODE.UNTIL,
+  ["Until Next"] = M.MODE.UNTIL,
   ["Permanent"] = M.MODE.PERMANENT,
 }
 
---- Apply a C4 hold-mode change to the device (keeps the current setpoint).
+--- Apply a C4 hold-mode change to the device, holding the current setpoint on
+--- the field the target mode reads.
 --- @param settings table
 --- @param c4HoldMode string
+--- @param comfortEndTime string|nil Schluter datetime for a Comfort hold end.
 --- @return table settings
-function M.applyHold(settings, c4HoldMode)
+function M.applyHold(settings, c4HoldMode, comfortEndTime)
   local mode = M.HOLD_TO_MODE[c4HoldMode]
   if mode then
+    if mode ~= M.MODE.AUTO then
+      setHeldTemp(settings, tonumber(settings.SetPointTemp), mode)
+      if mode == M.MODE.UNTIL and comfortEndTime then
+        settings.ComfortEndTime = comfortEndTime
+      end
+    end
     setMode(settings, mode)
   end
   return settings
+end
+
+--- Parse a Schluter TZ offset ("±HH:MM") into seconds east of UTC.
+--- @param tz string|nil
+--- @return integer
+function M.tzOffsetSeconds(tz)
+  local sign, h, m = tostring(tz):match("([%+%-])(%d+):(%d+)")
+  if not sign then
+    return 0
+  end
+  local secs = tonumber(h) * 3600 + tonumber(m) * 60
+  return sign == "-" and -secs or secs
+end
+
+--- Next enabled schedule event as a Schluter UTC datetime string
+--- ("dd/MM/yyyy HH:MM:SS +00:00"), for a Comfort hold's ComfortEndTime ("until
+--- the next scheduled change"). Returns nil if there is no schedule.
+--- @param device table
+--- @param nowUtc integer current UTC epoch (os.time())
+--- @param tzOffsetSec integer device offset east of UTC, seconds
+--- @return string|nil
+function M.nextEventEndTime(device, nowUtc, tzOffsetSec)
+  local schedules = (device or {}).Schedules
+  if type(schedules) ~= "table" then
+    return nil
+  end
+  -- Read (nowUtc + offset) as if UTC to get the device's local wall clock.
+  local localEpoch = nowUtc + tzOffsetSec
+  local lt = os.date("!*t", localEpoch)
+  local nowMin = lt.hour * 60 + lt.min
+  local midnightLocal = localEpoch - nowMin * 60 - lt.sec
+  -- Lua wday 1=Sun..7=Sat -> Schluter schedule index 1=Mon..7=Sun.
+  local luaToSchluter = { [1] = 7, [2] = 1, [3] = 2, [4] = 3, [5] = 4, [6] = 5, [7] = 6 }
+  for dayAhead = 0, 7 do
+    local wday = ((lt.wday - 1 + dayAhead) % 7) + 1
+    local sched = schedules[luaToSchluter[wday]]
+    if sched and type(sched.Events) == "table" then
+      for _, event in ipairs(sched.Events) do
+        local em = M.clockToMinutes(event.Clock)
+        if event.Active == true and (dayAhead > 0 or em > nowMin) then
+          local eventUtc = midnightLocal + dayAhead * 86400 + em * 60 - tzOffsetSec
+          return os.date("!%d/%m/%Y %H:%M:%S +00:00", eventUtc)
+        end
+      end
+    end
+  end
+  return nil
 end
 
 --- Set HVAC mode. "Heat" resumes the schedule (Auto); "Off" is a permanent hold
@@ -243,8 +323,11 @@ end
 --- @return table settings
 function M.applyHvacMode(settings, mode, minTempSchluter)
   if mode == "Off" then
+    -- Away/Off is a permanent (Manual) hold at the device minimum. Schluter's
+    -- Manual mode regulates to ManualTemperature and recomputes SetPointTemp from
+    -- it, so both must be written or the setpoint springs back and Off is lost.
+    setHeldTemp(settings, minTempSchluter or M.OFF_SENTINEL, M.MODE.PERMANENT)
     setMode(settings, M.MODE.PERMANENT)
-    settings.SetPointTemp = minTempSchluter or M.OFF_SENTINEL
   else
     setMode(settings, M.MODE.AUTO)
   end

@@ -137,7 +137,7 @@
     <schedule_entry />
     <fan_modes/>
     <hvac_modes>Off,Heat</hvac_modes>
-    <hold_modes>Off,2 Hours,Hold Until,Permanent</hold_modes>
+    <hold_modes>Off,Until Next,Permanent</hold_modes>
   </capabilities>
   <proxies>
     <proxy proxybindingid="5001" primary="True" name="Schluter Thermostat">thermostatV2</proxy>

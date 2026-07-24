@@ -75,6 +75,10 @@ local function pushCapabilities()
   end
   local caps = model.capabilities(gState)
   SendToProxy(PROXY_BINDING, "ALLOWED_HVAC_MODES_CHANGED", { MODES = caps.allowedHvacModes }, "NOTIFY")
+  -- Populate the hold-modes list; without this the proxy only accepts "Off" and
+  -- silently drops "Until Next"/"Permanent" (the static hold_modes cap alone
+  -- leaves HOLD_MODES_LIST empty).
+  SendToProxy(PROXY_BINDING, "ALLOWED_HOLD_MODES_CHANGED", { MODES = model.HOLD_MODES }, "NOTIFY")
   SendToProxy(PROXY_BINDING, "DYNAMIC_CAPABILITIES_CHANGED", {
     HAS_SINGLE_SETPOINT = caps.hasSingleSetpoint,
     CAN_HEAT = caps.canHeat,
@@ -223,6 +227,16 @@ local function applyAndSend(idBinding, mutate)
   pushToAccount()
 end
 
+--- The Schluter datetime for the next scheduled change, used as a temporary
+--- (Comfort) hold's end time so a manual override lasts "until next event".
+--- @return string|nil
+local function nextComfortEndTime()
+  if not gDevice then
+    return nil
+  end
+  return model.nextEventEndTime(gDevice, os.time(), model.tzOffsetSeconds(gDevice.TZOffset))
+end
+
 --- @param idBinding integer
 --- @param tParams table
 local function handleSetpoint(idBinding, tParams)
@@ -231,7 +245,7 @@ local function handleSetpoint(idBinding, tParams)
     return
   end
   applyAndSend(idBinding, function()
-    model.applySetpoint(gDevice, celsius)
+    model.applySetpoint(gDevice, celsius, nextComfortEndTime())
   end)
 end
 
@@ -262,7 +276,7 @@ end
 function RFP.SET_MODE_HOLD(idBinding, strCommand, tParams)
   log:trace("RFP.SET_MODE_HOLD(%s)", tostring((tParams or {}).MODE))
   applyAndSend(idBinding, function()
-    model.applyHold(gDevice, (tParams or {}).MODE)
+    model.applyHold(gDevice, (tParams or {}).MODE, nextComfortEndTime())
   end)
 end
 

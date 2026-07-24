@@ -13,7 +13,7 @@
 }
 </style>
 
-<img alt="Schluter Thermostat" src="./images/header.png" width="500"/>
+<img alt="Schluter Thermostat" src="./images/header.png" width="275"/>
 
 ______________________________________________________________________
 
@@ -30,7 +30,7 @@ This driver represents a single Schluter DITRA-HEAT floor-heating thermostat as
 a native Control4 thermostat, through the Control4 ThermostatV2 proxy. It does
 not talk to the cloud itself — it binds to the **Schluter** account driver,
 which hands it the device and its live state. The driver adapts its capabilities
-(heat-only, single setpoint, temperature range, schedule) to the device it is
+(heat-only, heat setpoint, temperature range, schedule) to the device it is
 given.
 
 # <span style="color:#f78d1f">Index</span>
@@ -72,8 +72,8 @@ given.
 # <span style="color:#f78d1f">Features</span>
 
 - Native Control4 ThermostatV2 proxy integration
-- Current floor temperature, single setpoint, and Heat/Off mode
-- Hold options (2 Hours, Hold Until, Permanent)
+- Current floor temperature, heat setpoint, and Heat/Off mode
+- Hold options (Until Next, Permanent)
 - Full weekly schedule read and edit via the native Control4 scheduling UI
 - Capabilities (setpoint range, schedule) adapt automatically to the bound
   device
@@ -84,8 +84,8 @@ given.
 # <span style="color:#f78d1f">Compatibility</span>
 
 Works with any Schluter DITRA-HEAT-E-WiFi thermostat discovered by the
-**Schluter** account driver. Schluter DITRA-HEAT is heat-only with a single
-setpoint, so cooling and dual-setpoint capabilities are not advertised.
+**Schluter** account driver. Schluter DITRA-HEAT is heat-only, so cooling and
+dual-setpoint capabilities are not advertised.
 
 # <span style="color:#f78d1f">Installer Setup</span>
 
@@ -160,13 +160,19 @@ a `TEMPERATURE_VALUE` connection (both Celsius and Fahrenheit).
 # <span style="color:#f78d1f">Scheduling</span>
 
 The thermostat's weekly schedule is read from Schluter and shown in the native
-Control4 thermostat scheduling UI, with four events per day (Wake, Leave,
-Return, Sleep). Editing an event in Control4 writes it back to the thermostat.
+Control4 thermostat scheduling UI, with six events per day. The weekday and
+weekend programs come straight from the device, so each day reflects what the
+thermostat is actually running. Editing an event in Control4 writes it back to
+the thermostat.
 
 Schluter groups days that share the same program (for example all weekdays):
 editing any day in a group updates the whole group, matching the thermostat's
 own behavior. To control a day independently, separate it from its group in the
 Schluter DITRA-HEAT WiFi app first.
+
+Setting a temperature outside the schedule puts the thermostat into a hold at
+that setpoint. Switch the mode back to Heat (or clear the hold) to resume the
+schedule.
 
 <!-- #ifdef DRIVERCENTRAL -->
 
