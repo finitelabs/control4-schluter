@@ -31,6 +31,7 @@ local constants = require("constants")
 
 local NS = constants.BINDING_NAMESPACE
 local CMD = constants.CMD
+local ACTION = constants.NOTIFY_ACTION
 
 -- The backend (legacy Schluter app API or official OAuth) owns its own session;
 -- the driver is backend-agnostic and only speaks the client contract.
@@ -200,10 +201,21 @@ local RECONCILE_INTERVAL_S = 5 * 60
 
 --- @type fun(generation: integer, backoffS: number): void
 local armNotifications
+--- Forward declaration: the notification loop re-authenticates when the server
+--- expires our session out from under us.
+--- @type fun(): void
+local login
 
 armNotifications = function(generation, backoffS)
-  if generation ~= gNotifyGeneration or not client:isAuthenticated() then
-    -- Retired by a newer login, or logged out. Let this loop die.
+  if generation ~= gNotifyGeneration then
+    -- Retired by a newer login. Let this loop die.
+    return
+  end
+  if not client:isAuthenticated() then
+    -- The session expired (a 401 clears it in the client). Log in again; a
+    -- successful login restarts the loop on a fresh generation.
+    log:info("no valid session; re-authenticating")
+    login()
     return
   end
   local startedAt = os.time()
@@ -214,9 +226,30 @@ armNotifications = function(generation, backoffS)
     if obj and obj.SequenceNr then
       gState.sequenceNr = tonumber(obj.SequenceNr) + 1
     end
-    -- A change was reported; re-read state, then re-arm (never faster than the
-    -- floor, so a server that keeps answering instantly can't spin us).
-    refreshThermostats()
+    -- The notification body embeds the changed thermostat in full (same 34-field
+    -- object /api/thermostats returns, Schedules included), so consume it
+    -- directly instead of re-reading the whole account on every poll. That is
+    -- what the official app does, and it removes a request per cycle from a host
+    -- that is already holding this long-poll open. Only fall back to a full read
+    -- when the payload carries no usable device, or the serial is one we have
+    -- not seen (a thermostat added or moved between groups).
+    local device = obj and obj.Thermostat
+    local serial = type(device) == "table" and tostring(device.SerialNumber) or nil
+    if obj and tonumber(obj.Action) == ACTION.REMOVED and serial then
+      gState.devices[serial] = nil
+      local binding = bindings:getDynamicBinding(NS, serial)
+      if binding then
+        SendToProxy(binding.bindingId, CMD.GO_OFFLINE, {})
+      end
+    elseif serial and serial ~= "nil" and serial ~= "" and gState.devices[serial] then
+      -- Claim a refresh slot so an /api/thermostats read already in flight can't
+      -- land afterwards and overwrite this newer state.
+      gRefreshIssued = gRefreshIssued + 1
+      gRefreshAccepted = gRefreshIssued
+      ingestThermostat(device)
+    else
+      refreshThermostats()
+    end
     local elapsed = os.time() - startedAt
     local delay = math.max(NOTIFY_MIN_INTERVAL_S - elapsed, 0)
     if delay > 0 then
@@ -251,7 +284,7 @@ end
 
 -- ─── Login ─────────────────────────────────────────────────────────────────
 
-local function login()
+login = function()
   local email = Properties["Email"]
   local password = Properties["Password"]
   if not email or email == "" or not password or password == "" then

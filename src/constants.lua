@@ -25,6 +25,16 @@ M.BINDING_NAMESPACE = "schluter"
 --- schluter_thermostat companion (consumer). Must match the companion driver.xml.
 M.THERMOSTAT_CLASS = "SCHLUTER_THERMOSTAT"
 
+--- `Action` values on a /api/notification response, alongside `SequenceNr` and
+--- the embedded `Thermostat`. Taken from the official app's notification handler
+--- (com.ojelectronics.microline.DataHelper): 1 and 2 both mean the thermostat was
+--- added or updated, 3 means it was removed from the account.
+M.NOTIFY_ACTION = {
+  ADDED = 1,
+  UPDATED = 2,
+  REMOVED = 3,
+}
+
 --- Proxy commands exchanged across the account ↔ companion binding.
 M.CMD = {
   --- account → companion: full thermostat object as {JSON=...}

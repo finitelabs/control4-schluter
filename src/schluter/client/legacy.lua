@@ -175,8 +175,42 @@ function Client:getThermostat(serialNumber)
     end)
 end
 
+--- The only fields the server accepts on a write. Taken from the official app,
+--- which serializes its POST body against `json.shared.ThermostatPost` and so
+--- sends exactly these (see docs/schluter-api-reference.md). Everything else on
+--- the thermostat object is read-only and echoing it back is meaningless —
+--- notably `SetPointTemp`, which the server derives from ManualTemperature /
+--- ComfortTemperature / the active schedule. Writing it does nothing, which is
+--- why a bare SetPointTemp write never took effect in Manual mode.
+local WRITABLE_FIELDS = {
+  "RegulationMode",
+  "ManualTemperature",
+  "ComfortTemperature",
+  "ComfortEndTime",
+  "Schedules",
+  "VacationEnabled",
+  "VacationBeginDay",
+  "VacationEndDay",
+  "VacationTemperature",
+  "LastPrimaryModeIsAuto",
+}
+
+--- Reduce a full thermostat object to the writable subset.
+--- @param settings table
+--- @return table
+local function _writable(settings)
+  local body = {}
+  for _, field in ipairs(WRITABLE_FIELDS) do
+    if settings[field] ~= nil then
+      body[field] = settings[field]
+    end
+  end
+  return body
+end
+
 --- Push a mutated settings object to a thermostat (setpoint / mode / hold and/or
---- Schedules[]). The object is the canonical Schluter thermostat shape.
+--- Schedules[]). Accepts the canonical Schluter thermostat shape and sends only
+--- the fields the server actually writes.
 --- @param serialNumber string
 --- @param settings table
 --- @return Deferred<table, any>
@@ -185,7 +219,7 @@ function Client:setThermostat(serialNumber, settings)
   local d = deferred.new()
   local url = self._host .. "/api/thermostat" .. _query({ sessionid = self._sessionId, serialnumber = serialNumber })
 
-  http:post(url, JSON:encode(settings), HEADERS):next(function(response)
+  http:post(url, JSON:encode(_writable(settings)), HEADERS):next(function(response)
     local object, err = _decode(response.body)
     if not object then
       return d:reject(err)
@@ -273,6 +307,14 @@ function Client:_getJson(path, options)
     end
     d:resolve(object)
   end, function(errorResponse)
+    -- Sessions expire server-side after a short idle period. Drop the dead one
+    -- so isAuthenticated() goes false and the caller can log in again; without
+    -- this the driver would retry forever against a session the server has
+    -- already forgotten.
+    if type(errorResponse) == "table" and errorResponse.code == 401 then
+      log:info("session rejected (401); clearing it so the driver re-authenticates")
+      self:logout()
+    end
     local detail = type(errorResponse) == "table" and errorResponse.error or errorResponse
     d:reject("GET " .. path .. " failed: " .. tostring(detail))
   end)
