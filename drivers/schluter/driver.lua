@@ -370,6 +370,45 @@ end
 
 -- ─── Messages from a companion (RFP dispatch) ──────────────────────────────
 
+--- Serial numbers with a POST in flight, and the most recent settings that
+--- arrived while it was. The companion re-POSTs its intended state every 12s
+--- until the cloud confirms, so without coalescing a single user action stacks
+--- several concurrent writes against a host that is already holding a long-poll
+--- open — which is how requests started timing out.
+--- @type table<string, boolean>
+local gWriteInFlight = {}
+--- @type table<string, table>
+local gQueuedWrite = {}
+
+--- @type fun(serial: string, settings: table): void
+local writeThermostat
+
+writeThermostat = function(serial, settings)
+  gWriteInFlight[serial] = true
+  --- Release the in-flight slot and send whatever arrived while we were busy.
+  local function done()
+    gWriteInFlight[serial] = nil
+    local queued = gQueuedWrite[serial]
+    if queued then
+      gQueuedWrite[serial] = nil
+      writeThermostat(serial, queued)
+    end
+  end
+  client:setThermostat(serial, settings):next(function(updated)
+    -- Take the next slot in the refresh sequence so any /api/thermostats read
+    -- that was already in flight when this write landed is discarded instead of
+    -- handing the companion the pre-write state.
+    gRefreshIssued = gRefreshIssued + 1
+    gRefreshAccepted = gRefreshIssued
+    gState.devices[serial] = updated
+    handoff(serial)
+    done()
+  end, function(err)
+    log:warn("setThermostat failed for %s: %s", serial, err)
+    done()
+  end)
+end
+
 --- A companion pushes mutated settings for us to write to Schluter.
 --- @param idBinding integer
 --- @param strCommand string
@@ -384,17 +423,14 @@ function RFP.setThermostat(idBinding, strCommand, tParams)
   if not ok or type(settings) ~= "table" then
     return
   end
-  client:setThermostat(serial, settings):next(function(updated)
-    -- Take the next slot in the refresh sequence so any /api/thermostats read
-    -- that was already in flight when this write landed is discarded instead of
-    -- handing the companion the pre-write state.
-    gRefreshIssued = gRefreshIssued + 1
-    gRefreshAccepted = gRefreshIssued
-    gState.devices[serial] = updated
-    handoff(serial)
-  end, function(err)
-    log:warn("setThermostat failed for %s: %s", serial, err)
-  end)
+  if gWriteInFlight[serial] then
+    -- Coalesce: keep only the newest intent and send it when the current POST
+    -- finishes. Nothing is lost, because each push carries the full object.
+    log:trace("write already in flight for %s; coalescing", serial)
+    gQueuedWrite[serial] = settings
+    return
+  end
+  writeThermostat(serial, settings)
 end
 
 -- ─── Actions (EC dispatch) ─────────────────────────────────────────────────

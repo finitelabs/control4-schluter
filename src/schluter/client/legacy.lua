@@ -193,19 +193,20 @@ function Client:setThermostat(serialNumber, settings)
     if object.Success == false then
       return d:reject("setThermostat rejected by server")
     end
-    -- Schluter's POST replies with just `{"Success":true}` — not the device. If
-    -- a device object came back (some backends do), use it; otherwise re-fetch
-    -- the authoritative device so callers get the real post-write state (e.g.
-    -- Manual mode derives SetPointTemp from ManualTemperature). Handing the bare
-    -- `{Success=true}` object to fromDevice() would crash on nil fields.
+    -- Schluter's POST replies with just `{"Success":true}` — not the device. If a
+    -- device object came back (some backends do), use it. Otherwise resolve with
+    -- the settings we just wrote rather than issuing a readback: the object we
+    -- sent already carries the post-write state on every field the caller reads
+    -- (setHeldTemp writes SetPointTemp alongside Manual/ComfortTemperature), and
+    -- the account reconciles against the cloud on its next refresh anyway. The
+    -- readback used to be a per-write GET on /api/thermostat, which piled a
+    -- fourth concurrent request onto a host already holding a long-poll and
+    -- routinely timed out — reporting a *write* failure for a read that failed
+    -- after the write had already succeeded.
     if type(object.Thermostat) == "table" or object.SerialNumber ~= nil then
       d:resolve(object.Thermostat or object)
     else
-      self:getThermostat(serialNumber):next(function(device)
-        d:resolve(device)
-      end, function(fetchErr)
-        d:reject(fetchErr)
-      end)
+      d:resolve(settings)
     end
   end, function(errorResponse)
     local detail = type(errorResponse) == "table" and errorResponse.error or errorResponse
