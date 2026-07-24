@@ -120,22 +120,21 @@ end
 --- triggers cooling. 35 °C = 95 °F, the convention other heat-only floor drivers use.
 local COOL_PLACEHOLDER_C = 35
 
---- Notify the proxy of one schedule entry. thermostatV2 schedule setpoints are
---- canonical decikelvin ((°C + 273.15) × 10) — the same unit the proxy sends on
---- UPDATE_SCHEDULE_ENTRIES. A scaled value (°F/°C) is misread as Kelvin and
---- clamped to the setpoint minimum, so always send decikelvin.
+--- Notify the proxy of one schedule entry. The thermostatV2 schedule channel
+--- takes setpoints as °C×10 (deci-Celsius) with no Units field — the same unit
+--- the schedule_default template uses (278 → 27.8 °C → 82 °F). Verified against
+--- the proxy's SCHEDULE variable: other forms are mis-read — a plain °C value
+--- with Units="C" is integer-truncated (27.78 → 27), and a bare value with no
+--- Units is read as °C×10, so decikelvin (3009) clamps to the 158 °F max.
 --- @param row table { c4Day, entryIndex, minutes, active, tempC }
 local function pushScheduleEntry(row)
-  -- No Units field: the setpoints are canonical decikelvin, decoded the same way
-  -- inbound UPDATE_SCHEDULE_ENTRIES arrives (unit-agnostic). Sending Units risks
-  -- the proxy reinterpreting the decikelvin value as °C/°F.
   SendToProxy(PROXY_BINDING, "SCHEDULE_ENTRY_CHANGED", {
     DayIndex = tostring(row.c4Day),
     EntryIndex = tostring(row.entryIndex),
     TimeMinutes = tostring(row.minutes),
     EnabledFlag = row.active and "true" or "false",
-    HeatSetpoint = tostring(model.cToC4(row.tempC)),
-    CoolSetpoint = tostring(model.cToC4(COOL_PLACEHOLDER_C)),
+    HeatSetpoint = tostring(model.round(row.tempC * 10)),
+    CoolSetpoint = tostring(model.round(COOL_PLACEHOLDER_C * 10)),
   }, "NOTIFY")
 end
 
