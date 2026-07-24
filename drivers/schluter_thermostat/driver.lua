@@ -120,12 +120,12 @@ end
 --- triggers cooling. 35 °C = 95 °F, the convention other heat-only floor drivers use.
 local COOL_PLACEHOLDER_C = 35
 
---- Notify the proxy of one schedule entry. The thermostatV2 schedule channel
---- takes setpoints as °C×10 (deci-Celsius) with no Units field — the same unit
---- the schedule_default template uses (278 → 27.8 °C → 82 °F). Verified against
---- the proxy's SCHEDULE variable: other forms are mis-read — a plain °C value
---- with Units="C" is integer-truncated (27.78 → 27), and a bare value with no
---- Units is read as °C×10, so decikelvin (3009) clamps to the 158 °F max.
+--- Notify the proxy of one schedule entry. Unlike the live setpoint (which keeps
+--- full-precision °C), the schedule channel parses HeatSetpoint/CoolSetpoint as
+--- an *integer* — a °C value with decimals is truncated to a whole degree
+--- (verified via the proxy SCHEDULE variable: 27.78 was stored as 27 → 81 °F).
+--- So send a whole degree that carries no lost precision: integer °F with
+--- SCALE="F". The proxy owns the conversion back to the project's display scale.
 --- @param row table { c4Day, entryIndex, minutes, active, tempC }
 local function pushScheduleEntry(row)
   SendToProxy(PROXY_BINDING, "SCHEDULE_ENTRY_CHANGED", {
@@ -133,8 +133,9 @@ local function pushScheduleEntry(row)
     EntryIndex = tostring(row.entryIndex),
     TimeMinutes = tostring(row.minutes),
     EnabledFlag = row.active and "true" or "false",
-    HeatSetpoint = tostring(model.round(row.tempC * 10)),
-    CoolSetpoint = tostring(model.round(COOL_PLACEHOLDER_C * 10)),
+    HeatSetpoint = tostring(model.round(model.cToF(row.tempC))),
+    CoolSetpoint = tostring(model.round(model.cToF(COOL_PLACEHOLDER_C))),
+    SCALE = "F",
   }, "NOTIFY")
 end
 
