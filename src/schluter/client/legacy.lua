@@ -25,10 +25,13 @@ local JSON = require("JSON")
 --- host + Application id; both are configured via new({ host, applicationId }).
 local DEFAULT_HOST = "https://www.myschluter.com"
 local HEADERS = { ["Content-Type"] = "application/json; charset=utf-8" }
--- The notification endpoint long-polls: the server holds the request open until
--- a change occurs or the timeout elapses. Give it well over the ~5 min the old
--- driver used so we don't tear the connection down early.
-local NOTIFY_TIMEOUT_S = 330
+-- The notification endpoint long-polls: the server holds the request open (~5 min)
+-- until a change occurs or its own timeout elapses. Stay comfortably *under* the
+-- server's hold — lib.http clamps request timeouts to 300s, so asking for more
+-- silently lands on 300 and races the server's reply, tearing down the connection
+-- at the exact moment it answers. Nothing is lost by expiring early: the cursor
+-- (sequencenr) means the next poll re-delivers anything that happened meanwhile.
+local NOTIFY_TIMEOUT_S = 240
 
 --- @class SchluterAuthError
 --- @field errorCode number Schluter ErrorCode (1/2 = invalid credentials)

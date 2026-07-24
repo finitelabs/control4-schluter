@@ -47,6 +47,21 @@ local gState = {
   devices = {},
 }
 
+--- Incremented on every login so a long-poll loop started by an earlier login
+--- retires itself instead of running forever alongside the new one. Without this,
+--- each re-login (credential edit, Reset Driver) leaves its loop in flight; they
+--- accumulate, and their overlapping refreshes can deliver an *older* snapshot
+--- after a newer one and stomp good state.
+--- @type integer
+local gNotifyGeneration = 0
+
+--- Monotonic ids for thermostat refreshes, so a slow response that started before
+--- a newer one can't overwrite the newer result.
+--- @type integer
+local gRefreshIssued = 0
+--- @type integer
+local gRefreshAccepted = 0
+
 --- Set true once OnDriverLateInit finishes; guards the property-sync handlers
 --- from firing while Composer loads the initial property values.
 local gInitialized = false
@@ -136,15 +151,25 @@ local function ingestThermostat(device)
   handoff(serial)
 end
 
---- Fetch the full thermostat list for the account and ingest each.
+--- Fetch the full thermostat list for the account and ingest each. Responses are
+--- accepted in issue order only: with several refreshes in flight (a notification
+--- and the safety-net poll can overlap) a slow earlier response would otherwise
+--- land last and hand a stale device to the companion.
 local function refreshThermostats()
   if not client:isAuthenticated() then
     return
   end
+  gRefreshIssued = gRefreshIssued + 1
+  local refreshId = gRefreshIssued
   client:getThermostats():next(function(list)
     if type(list) ~= "table" then
       return
     end
+    if refreshId < gRefreshAccepted then
+      log:trace("discarding stale thermostat refresh %d (accepted %d)", refreshId, gRefreshAccepted)
+      return
+    end
+    gRefreshAccepted = refreshId
     for _, device in ipairs(list) do
       ingestThermostat(device)
     end
@@ -157,24 +182,71 @@ end
 
 -- ─── Real-time notification long-poll ──────────────────────────────────────
 
---- @type fun(): void
+--- Floor between polls. The server normally holds the request open for minutes,
+--- but it answers immediately when it has a backlog — or when something is wrong
+--- (expired session, error body returned with HTTP 200). Without a floor those
+--- immediate returns re-arm in a tight loop that hammers the API.
+local NOTIFY_MIN_INTERVAL_S = 2
+--- Backoff after a failed poll, and the ceiling it grows to.
+local NOTIFY_RETRY_S = 5
+local NOTIFY_RETRY_MAX_S = 60
+--- A poll that survived at least this long before failing was a healthy
+--- long-poll that simply expired, not a broken connection worth backing off from.
+local NOTIFY_HEALTHY_RUN_S = 30
+--- Safety net: the long-poll is the only thing that refreshes state, so if the
+--- notification stream silently stops (dropped connection, session expiry) the
+--- driver would sit on a stale device forever. Reconcile on this cadence too.
+local RECONCILE_INTERVAL_S = 5 * 60
+
+--- @type fun(generation: integer, backoffS: number): void
 local armNotifications
 
-armNotifications = function()
-  if not client:isAuthenticated() then
+armNotifications = function(generation, backoffS)
+  if generation ~= gNotifyGeneration or not client:isAuthenticated() then
+    -- Retired by a newer login, or logged out. Let this loop die.
     return
   end
+  local startedAt = os.time()
   client:getNotification(gState.sequenceNr):next(function(obj)
+    if generation ~= gNotifyGeneration then
+      return
+    end
     if obj and obj.SequenceNr then
       gState.sequenceNr = tonumber(obj.SequenceNr) + 1
     end
-    -- A change was reported; re-read state, then re-arm immediately.
+    -- A change was reported; re-read state, then re-arm (never faster than the
+    -- floor, so a server that keeps answering instantly can't spin us).
     refreshThermostats()
-    armNotifications()
+    local elapsed = os.time() - startedAt
+    local delay = math.max(NOTIFY_MIN_INTERVAL_S - elapsed, 0)
+    if delay > 0 then
+      SetTimer("SchluterNotify", delay * ONE_SECOND, function()
+        armNotifications(generation, NOTIFY_RETRY_S)
+      end)
+    else
+      armNotifications(generation, NOTIFY_RETRY_S)
+    end
   end, function(err)
-    log:trace("notification poll ended (%s); re-arming", err)
-    SetTimer("SchluterNotify", 5 * ONE_SECOND, armNotifications)
+    if generation ~= gNotifyGeneration then
+      return
+    end
+    -- A poll that ran a long time before failing is just the long-poll expiring
+    -- with nothing to report — normal, so re-arm promptly at the base delay.
+    -- Only a *fast* failure (auth, DNS, refused) earns a growing backoff.
+    local expired = (os.time() - startedAt) >= NOTIFY_HEALTHY_RUN_S
+    local delay = expired and NOTIFY_RETRY_S or (backoffS or NOTIFY_RETRY_S)
+    log:trace("notification poll ended after %ds (%s); re-arming in %ds", os.time() - startedAt, err, delay)
+    SetTimer("SchluterNotify", delay * ONE_SECOND, function()
+      armNotifications(generation, expired and NOTIFY_RETRY_S or math.min(delay * 2, NOTIFY_RETRY_MAX_S))
+    end)
   end)
+end
+
+--- Retire any in-flight notification loop and start a fresh one.
+local function restartNotifications()
+  gNotifyGeneration = gNotifyGeneration + 1
+  CancelTimer("SchluterNotify")
+  armNotifications(gNotifyGeneration, NOTIFY_RETRY_S)
 end
 
 -- ─── Login ─────────────────────────────────────────────────────────────────
@@ -193,9 +265,14 @@ local function login()
     gState.sequenceNr = 0
     C4:UpdateProperty("Login Status", "Logged In")
     refreshThermostats()
-    armNotifications()
+    restartNotifications()
+    -- Reconcile regardless of the notification stream (see RECONCILE_INTERVAL_S).
+    SetTimer("SchluterReconcile", RECONCILE_INTERVAL_S * ONE_SECOND, refreshThermostats, true)
   end, function(err)
     client:logout()
+    gNotifyGeneration = gNotifyGeneration + 1
+    CancelTimer("SchluterNotify")
+    CancelTimer("SchluterReconcile")
     C4:UpdateProperty("Login Status", err.message or "Login failed")
     C4:UpdateProperty("Driver Status", "Not connected")
     log:warn("login failed: %s", err.message)
