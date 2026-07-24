@@ -109,6 +109,7 @@ local function pushState()
   }, "NOTIFY")
   SendToProxy(PROXY_BINDING, "HVAC_MODE_CHANGED", { MODE = model.hvacMode(gState) }, "NOTIFY")
   SendToProxy(PROXY_BINDING, "HVAC_STATE_CHANGED", { STATE = model.hvacState(gState) }, "NOTIFY")
+  SendToProxy(PROXY_BINDING, "HOLD_MODE_CHANGED", { MODE = model.holdMode(gState) }, "NOTIFY")
   SendToProxy(TEMP_OUTPUT_BINDING, "VALUE_CHANGED", {
     CELSIUS = tostring(gState.temperatureC),
     FAHRENHEIT = tostring(model.cToF(gState.temperatureC)),
@@ -255,6 +256,13 @@ function RFP.SET_MODE_OFF(idBinding)
   log:trace("RFP.SET_MODE_OFF(%s)", idBinding)
   applyAndSend(idBinding, function()
     model.applyHvacMode(gDevice, "Off", gDevice.MinTemp)
+  end)
+end
+
+function RFP.SET_MODE_HOLD(idBinding, strCommand, tParams)
+  log:trace("RFP.SET_MODE_HOLD(%s)", tostring((tParams or {}).MODE))
+  applyAndSend(idBinding, function()
+    model.applyHold(gDevice, (tParams or {}).MODE)
   end)
 end
 

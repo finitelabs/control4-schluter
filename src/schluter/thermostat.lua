@@ -166,7 +166,39 @@ function M.hvacMode(state)
   return state.isOff and "Off" or "Heat"
 end
 
+--- C4 hold mode from device state: Until is a temporary hold ("Hold Until"), a
+--- Permanent regulation that is not the Away/Off sentinel is a permanent hold,
+--- and Auto (following the schedule) or Away is no hold ("Off").
+--- @param state SchluterState
+--- @return string
+function M.holdMode(state)
+  if state.scheduleMode == M.MODE.UNTIL then
+    return "Hold Until"
+  elseif state.scheduleMode == M.MODE.PERMANENT and not state.isOff then
+    return "Permanent"
+  end
+  return "Off"
+end
+
 -- ─── Settings builders (Control4 → Schluter POST body) ───────────────────────
+
+--- The device's current regulation mode. Schluter uses `RegulationMode`; NuHeat
+--- uses `ScheduleMode` (same 1/2/3 enum). Read whichever is present.
+--- @param settings table
+--- @return integer|nil
+function M.currentMode(settings)
+  return tonumber(settings.RegulationMode or settings.ScheduleMode)
+end
+
+--- Set the regulation mode on both fields so either backend honors it. Schluter
+--- reads `RegulationMode` (setting only `ScheduleMode` is silently ignored, so
+--- the device keeps following its schedule and the setpoint never holds).
+--- @param settings table
+--- @param mode integer
+local function setMode(settings, mode)
+  settings.RegulationMode = mode
+  settings.ScheduleMode = mode
+end
 
 --- Set the heat setpoint (°C). Puts the thermostat into a temporary "Until"
 --- hold unless it is already in an Until/Permanent hold.
@@ -175,8 +207,30 @@ end
 --- @return table settings
 function M.applySetpoint(settings, celsius)
   settings.SetPointTemp = M.cToSchluter(M.normalize(celsius))
-  if settings.ScheduleMode ~= M.MODE.UNTIL and settings.ScheduleMode ~= M.MODE.PERMANENT then
-    settings.ScheduleMode = M.MODE.UNTIL
+  local mode = M.currentMode(settings)
+  if mode ~= M.MODE.UNTIL and mode ~= M.MODE.PERMANENT then
+    setMode(settings, M.MODE.UNTIL)
+  end
+  return settings
+end
+
+--- C4 hold-mode string -> regulation mode. "Off" resumes the schedule (Auto);
+--- the timed/until holds map to Until; Permanent maps to Permanent.
+M.HOLD_TO_MODE = {
+  ["Off"] = M.MODE.AUTO,
+  ["2 Hours"] = M.MODE.UNTIL,
+  ["Hold Until"] = M.MODE.UNTIL,
+  ["Permanent"] = M.MODE.PERMANENT,
+}
+
+--- Apply a C4 hold-mode change to the device (keeps the current setpoint).
+--- @param settings table
+--- @param c4HoldMode string
+--- @return table settings
+function M.applyHold(settings, c4HoldMode)
+  local mode = M.HOLD_TO_MODE[c4HoldMode]
+  if mode then
+    setMode(settings, mode)
   end
   return settings
 end
@@ -189,10 +243,10 @@ end
 --- @return table settings
 function M.applyHvacMode(settings, mode, minTempSchluter)
   if mode == "Off" then
-    settings.ScheduleMode = M.MODE.PERMANENT
+    setMode(settings, M.MODE.PERMANENT)
     settings.SetPointTemp = minTempSchluter or M.OFF_SENTINEL
   else
-    settings.ScheduleMode = M.MODE.AUTO
+    setMode(settings, M.MODE.AUTO)
   end
   return settings
 end
