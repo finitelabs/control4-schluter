@@ -34,6 +34,18 @@ local gState = nil
 --- NuHeat Signature driver), matching the editor's grid so they don't drift.
 local gScale = "F"
 
+--- Pending optimistic write. Schluter's cloud is slow to reflect changes —
+--- especially *leaving* a hold (seconds to tens of seconds) — and occasionally
+--- drops a write entirely. After we POST a mode change we remember the intended
+--- regulation mode so that (1) handoffs still showing the old mode don't snap the
+--- UI back, and (2) a retry loop re-POSTs until the cloud confirms or we give up.
+--- @type { mode: integer, ts: integer }|nil
+local gPending = nil
+--- Stop trusting the optimistic state after this long (cloud won: accept reality).
+local CONFIRM_TIMEOUT_S = 60
+--- Re-POST an unconfirmed write on this cadence to survive dropped writes.
+local RETRY_INTERVAL_S = 12
+
 --- @return boolean
 local function isCelsius()
   return tostring(gScale):sub(1, 1):upper() == "C"
@@ -125,6 +137,34 @@ local function pushToAccount()
   if gDevice then
     SendToProxy(ACCOUNT_BINDING, constants.CMD.SET_THERMOSTAT, { JSON = JSON:encode(gDevice) })
   end
+end
+
+--- Re-POST the intended settings on a timer until the cloud confirms the pending
+--- mode change (handled in updateThermostat) or we time out. This is what makes a
+--- change actually stick when Schluter drops or is slow to apply the first write.
+local function scheduleConfirm()
+  SetTimer("SchluterConfirm", RETRY_INTERVAL_S * ONE_SECOND, function()
+    if not gPending then
+      return
+    end
+    if (os.time() - gPending.ts) >= CONFIRM_TIMEOUT_S then
+      gPending = nil
+      return
+    end
+    pushToAccount()
+    scheduleConfirm()
+  end)
+end
+
+--- Mark the regulation mode we just wrote as pending and arm the confirm/retry
+--- loop. Called right after a command POSTs, so the optimistic state survives
+--- stale handoffs and dropped writes.
+local function markPending()
+  if not gDevice then
+    return
+  end
+  gPending = { mode = model.currentMode(gDevice), ts = os.time() }
+  scheduleConfirm()
 end
 
 -- ─── Schedule (thermostatV2 schedule proxy ⇄ Schluter Schedules[]) ────────────
@@ -224,7 +264,14 @@ local function applyAndSend(idBinding, mutate)
     return
   end
   mutate()
+  -- Reflect the change on the proxy immediately (optimistic). Schluter can take
+  -- tens of seconds to apply a change and there may be no handoff until it does,
+  -- so without this the UI would sit on the old state (and look like it "didn't
+  -- stick"). markPending + the confirm loop keep it from reverting and re-POST.
+  gState = model.fromDevice(gDevice)
   pushToAccount()
+  markPending()
+  pushState()
 end
 
 --- The Schluter datetime for the next scheduled change, used as a temporary
@@ -339,7 +386,26 @@ function RFP.updateThermostat(idBinding, strCommand, tParams)
   if not ok or type(device) ~= "table" then
     return
   end
-  gDevice = device.Thermostat or device
+  device = device.Thermostat or device
+  if gPending and (os.time() - gPending.ts) < CONFIRM_TIMEOUT_S then
+    if model.currentMode(device) == gPending.mode then
+      -- Cloud caught up to our write; trust reality from here on.
+      gPending = nil
+      gDevice = device
+    elseif gDevice then
+      -- Stale handoff (cloud hasn't applied the write yet, or dropped it). Keep
+      -- our intended state so the UI doesn't snap back; only refresh the live
+      -- sensor fields. The confirm loop keeps re-POSTing until it takes.
+      gDevice.Temperature = device.Temperature
+      gDevice.Heating = device.Heating
+      gDevice.Online = device.Online
+    else
+      gDevice = device
+    end
+  else
+    gPending = nil
+    gDevice = device
+  end
   gState = model.fromDevice(gDevice)
   C4:UpdateProperty("Serial ID", gState.serialNumber)
   pushCapabilities()
@@ -353,7 +419,7 @@ function RFP.goOffline(idBinding, strCommand)
   SendToProxy(PROXY_BINDING, "ONLINE_CHANGED", { STATE = false }, "NOTIFY")
   C4:UpdateProperty("Serial ID", "")
   C4:UpdateProperty("Driver Status", "Offline")
-  gDevice, gState, gScheduleJson = nil, nil, nil
+  gDevice, gState, gScheduleJson, gPending = nil, nil, nil, nil
 end
 
 -- ─── Property + lifecycle ──────────────────────────────────────────────────
