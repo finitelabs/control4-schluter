@@ -385,6 +385,11 @@ function RFP.setThermostat(idBinding, strCommand, tParams)
     return
   end
   client:setThermostat(serial, settings):next(function(updated)
+    -- Take the next slot in the refresh sequence so any /api/thermostats read
+    -- that was already in flight when this write landed is discarded instead of
+    -- handing the companion the pre-write state.
+    gRefreshIssued = gRefreshIssued + 1
+    gRefreshAccepted = gRefreshIssued
     gState.devices[serial] = updated
     handoff(serial)
   end, function(err)
