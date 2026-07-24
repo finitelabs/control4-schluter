@@ -29,6 +29,16 @@ local TEMP_OUTPUT_BINDING = 5010
 local gDevice = nil
 --- Normalized state derived from gDevice (see schluter.thermostat).
 local gState = nil
+--- The project's display scale ("C"/"F"), reported by the proxy's SET_SCALE.
+--- Schedule setpoints are pushed as integer values in this scale (like the
+--- NuHeat Signature driver), matching the editor's grid so they don't drift.
+local gScale = "F"
+
+--- @return boolean
+local function isCelsius()
+  return tostring(gScale):sub(1, 1):upper() == "C"
+end
+
 -- ─── Command param parsing ─────────────────────────────────────────────────
 
 --- Extract a Celsius value from a proxy setpoint command's params.
@@ -120,22 +130,30 @@ end
 --- triggers cooling. 35 °C = 95 °F, the convention other heat-only floor drivers use.
 local COOL_PLACEHOLDER_C = 35
 
---- Notify the proxy of one schedule entry. Unlike the live setpoint (which keeps
---- full-precision °C), the schedule channel parses HeatSetpoint/CoolSetpoint as
---- an *integer* — a °C value with decimals is truncated to a whole degree
---- (verified via the proxy SCHEDULE variable: 27.78 was stored as 27 → 81 °F).
---- So send a whole degree that carries no lost precision: integer °F with
---- SCALE="F". The proxy owns the conversion back to the project's display scale.
+--- Notify the proxy of one schedule entry. Following the NuHeat Signature driver
+--- (same OJ platform), the setpoint is sent as an integer in the project's
+--- display scale with a matching Units field — integer °F + "F", or integer °C +
+--- "C" — so it lands on the editor's grid without drifting.
 --- @param row table { c4Day, entryIndex, minutes, active, tempC }
 local function pushScheduleEntry(row)
+  local heat, cool, units
+  if isCelsius() then
+    heat = model.round(model.normalize(row.tempC))
+    cool = model.round(COOL_PLACEHOLDER_C)
+    units = "C"
+  else
+    heat = model.round(model.cToF(row.tempC))
+    cool = model.round(model.cToF(COOL_PLACEHOLDER_C))
+    units = "F"
+  end
   SendToProxy(PROXY_BINDING, "SCHEDULE_ENTRY_CHANGED", {
     DayIndex = tostring(row.c4Day),
     EntryIndex = tostring(row.entryIndex),
     TimeMinutes = tostring(row.minutes),
     EnabledFlag = row.active and "true" or "false",
-    HeatSetpoint = tostring(model.round(model.cToF(row.tempC))),
-    CoolSetpoint = tostring(model.round(model.cToF(COOL_PLACEHOLDER_C))),
-    SCALE = "F",
+    HeatSetpoint = tostring(heat),
+    CoolSetpoint = tostring(cool),
+    Units = units,
   }, "NOTIFY")
 end
 
@@ -240,11 +258,14 @@ function RFP.SET_MODE_OFF(idBinding)
   end)
 end
 
---- The proxy reports the project's display scale ("C"/"F"). Setpoints are pushed
---- as scale-absolute decikelvin, so no conversion is needed; just re-push the
---- schedule so it repaints promptly when the display scale changes.
+--- The proxy reports the project's display scale ("C"/"F"). Track it and re-push
+--- the schedule so its setpoints are in that scale (matching the editor grid).
 function RFP.SET_SCALE(idBinding, strCommand, tParams)
-  log:trace("RFP.SET_SCALE(%s)", tostring((tParams or {}).SCALE))
+  local scale = (tParams or {}).SCALE
+  if scale and scale ~= "" then
+    gScale = scale
+  end
+  log:trace("RFP.SET_SCALE(%s)", tostring(gScale))
   gScheduleJson = nil
   pushSchedule()
 end
