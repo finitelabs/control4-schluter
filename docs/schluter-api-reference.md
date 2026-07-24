@@ -147,3 +147,75 @@ account to enumerate them.
 - Exact notification payload shape (what `SequenceNr`/events carry).
 - Whether `/api/thermostats` returns full objects or serial numbers only.
 - `OperatingMode` vs `ScheduleMode` distinction.
+
+---
+
+# Findings from the official Android app (com.schluter.app 1.8.0)
+
+Decompiled with `jadx`. The app is not obfuscated and the relevant classes are
+`json.DataFetcher`, `json.shared.ThermostatPost` and
+`com.ojelectronics.microline.DataHelper`. It is an OJ Electronics codebase; the
+Schluter build only differs by `BaseUrl` and `Config.Application`.
+
+## `/api/defaults` exists (we were not using it)
+
+    GET /api/defaults?sessionId=<sid>&serialnumber=<serial>
+
+Returns the *factory* configuration for that thermostat, verified live:
+
+- `ScheduleDefault[]` — the factory schedule, **per day group (WeekDayGrpNo 1-7)**,
+  including the weekday/weekend split. Mon-Fri start 06:00; Sat/Sun start 08:00
+  with only events 1 and 6 active.
+- `MinTimeLimits[]` / `MaxTimeLimits[]` — the permitted clock range for each
+  `ScheduleType`, staggered 30 min per slot:
+
+      Event 1 (type 0): 00:00 .. 22:00      Event 4 (type 3): 01:30 .. 23:30
+      Event 2 (type 1): 00:30 .. 22:30      Event 5 (type 4): 02:00 .. 24:00
+      Event 3 (type 2): 01:00 .. 23:00      Event 6 (type 5): 04:00 .. 27:00
+
+  These are what enforce the time ordering of the six events, and they explain
+  why a slot cannot simply be moved anywhere in the day. We do not validate
+  against them today.
+
+A captured response is in `samples-defaults-response.json`.
+
+## The POST body is a restricted field set
+
+`DataFetcher.ThermostatPostFetch` serializes with
+`new Gson().toJson(thermostat, ThermostatPost.class)`, so only the fields
+declared on `json.shared.ThermostatPost` are ever sent:
+
+    RegulationMode, ManualTemperature, ComfortTemperature, ComfortEndTime,
+    Schedules, VacationEnabled, VacationBeginDay, VacationEndDay,
+    VacationTemperature, LastPrimaryModeIsAuto, KwCharge, FloorArea
+
+Notably **`SetPointTemp` is never written** — it is derived server-side from
+`ManualTemperature` / `ComfortTemperature` / the schedule, which matches what we
+observed on the device. Everything else in the thermostat object
+(`SerialNumber`, `Online`, `Temperature`, `MinTemp`/`MaxTemp`, `SWVersion`,
+`Support`, `Room`, …) is read-only and the app never echoes it back.
+
+Measured: body size does not affect POST latency (21 B, 3.8 kB and 4.4 kB bodies
+all completed in ~0.30 s, 15/15). Trimming is a correctness change, not a
+performance one.
+
+## The notification response carries the changed thermostat inline
+
+`DataHelper` (the `runNotifications` loop) shows the app does **not** re-read the
+thermostat list on every notification. The notification body contains:
+
+- `Thermostat` — the full changed thermostat object
+- `Action` — 1/2 = added or updated, 3 = removed
+- `SequenceNr`
+
+The app patches its in-memory list from that embedded object and only issues a
+full `GET /api/thermostats` when the thermostat is unknown or has changed group.
+Our driver re-GETs the whole account on every notification, which is an extra
+request per cycle against a host that is already holding the long-poll open.
+
+Two smaller differences:
+
+- The app re-requests with the sequence number **as received**
+  (`DataHelper.getSequenceNr()`), not `SequenceNr + 1` as we do.
+- On a failed poll it sleeps 5 s and retries, with a single `runNotifications`
+  flag guarding against concurrent loops.
