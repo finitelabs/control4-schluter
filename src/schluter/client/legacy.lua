@@ -50,6 +50,9 @@ function Client:new(config)
     _sessionId = nil,
     _host = config.host or DEFAULT_HOST,
     _applicationId = config.applicationId,
+    --- Transfer handle for the in-flight notification long-poll, so it can be
+    --- aborted when a write needs the connection (see cancelNotification).
+    _notifyTransfer = nil,
   }, self)
 end
 
@@ -281,15 +284,65 @@ end
 
 --- Long-poll for the next account notification. Resolves when the server
 --- returns (a change occurred) or the request completes; the caller inspects
---- `SequenceNr` and re-requests with the next sequence number.
+--- `SequenceNr` and re-requests with the next sequence number. The response also
+--- embeds the changed `Thermostat` and an `Action` (see constants.NOTIFY_ACTION).
+---
+--- This one request is issued through `urlDo` rather than lib.http so we can keep
+--- the transfer handle and abort it later (see cancelNotification): the
+--- controller starves POSTs while this long-poll is open, so a write has to be
+--- able to take the connection back.
 --- @param sequenceNr number
 --- @return Deferred<table, any>
 function Client:getNotification(sequenceNr)
   log:trace("legacy:getNotification(seq=%s)", sequenceNr)
-  return self:_getJson(
-    "/api/notification" .. _query({ sessionid = self._sessionId, sequencenr = sequenceNr }),
-    { timeout = NOTIFY_TIMEOUT_S }
-  )
+  local d = deferred.new()
+  local path = "/api/notification" .. _query({ sessionid = self._sessionId, sequencenr = sequenceNr })
+  local url = self._host .. path
+
+  local transfer = urlDo("GET", url, nil, HEADERS, function(strError, responseCode, _headers, responseBody)
+    self._notifyTransfer = nil
+    if strError or IsEmpty(responseCode) or responseCode < 200 or responseCode >= 300 then
+      if responseCode == 401 then
+        log:info("session rejected (401) on notification; clearing it")
+        self:logout()
+      end
+      return d:reject(
+        string.format(
+          "GET %s failed%s%s",
+          path,
+          not IsEmpty(responseCode) and (" with status code " .. responseCode) or "",
+          not IsEmpty(strError) and ("; " .. strError) or ""
+        )
+      )
+    end
+    local object, err = _decode(responseBody)
+    if not object then
+      return d:reject(err)
+    end
+    d:resolve(object)
+  end, nil, { timeout = NOTIFY_TIMEOUT_S })
+
+  -- urlDo only hands back a transfer object on the newer url stack; without one
+  -- we simply cannot abort, and the caller falls back to ignoring the response.
+  self._notifyTransfer = transfer
+  return d
+end
+
+--- Abort the in-flight notification long-poll, freeing the connection it holds.
+--- The pending request rejects with a cancellation error, which the caller
+--- ignores (its loop generation has already been retired).
+--- @return boolean cancelled True if a transfer was actually aborted.
+function Client:cancelNotification()
+  local transfer = self._notifyTransfer
+  self._notifyTransfer = nil
+  if not transfer or type(transfer.Cancel) ~= "function" then
+    return false
+  end
+  local ok = pcall(function()
+    transfer:Cancel()
+  end)
+  log:trace("legacy:cancelNotification() -> %s", ok)
+  return ok
 end
 
 -- ─── Internals ─────────────────────────────────────────────────────────────

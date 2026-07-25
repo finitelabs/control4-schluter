@@ -282,6 +282,26 @@ local function restartNotifications()
   armNotifications(gNotifyGeneration, NOTIFY_RETRY_S)
 end
 
+--- Retire the notification loop *and* abort the long-poll it is holding open.
+---
+--- Measured on the controller: with the long-poll in flight, 4 of 7 writes died
+--- at a 30s timeout and the survivors took 17-30s; with it stopped, 8 of 8
+--- completed in under a second. The controller will not run a POST alongside the
+--- held connection, so a write has to take that connection back first. Retiring
+--- the generation alone is not enough — that only makes us ignore the response
+--- while the socket stays open — hence the explicit cancel.
+local function suspendNotifications()
+  gNotifyGeneration = gNotifyGeneration + 1
+  CancelTimer("SchluterNotify")
+  if type(client.cancelNotification) == "function" then
+    client:cancelNotification()
+  end
+end
+
+--- Grace period between aborting the long-poll and issuing the write. Cancelling
+--- a transfer may not release its connection synchronously.
+local WRITE_DELAY_MS = 600
+
 -- ─── Login ─────────────────────────────────────────────────────────────────
 
 login = function()
@@ -418,27 +438,40 @@ local writeThermostat
 
 writeThermostat = function(serial, settings)
   gWriteInFlight[serial] = true
-  --- Release the in-flight slot and send whatever arrived while we were busy.
+  -- Take the connection back from the long-poll before POSTing (see
+  -- suspendNotifications), otherwise this write is likely to time out.
+  suspendNotifications()
+  --- Release the in-flight slot and send whatever arrived while we were busy,
+  --- resuming the notification stream once nothing is left to write.
   local function done()
     gWriteInFlight[serial] = nil
     local queued = gQueuedWrite[serial]
     if queued then
       gQueuedWrite[serial] = nil
       writeThermostat(serial, queued)
+      return
+    end
+    if next(gWriteInFlight) == nil then
+      restartNotifications()
     end
   end
-  client:setThermostat(serial, settings):next(function(updated)
-    -- Take the next slot in the refresh sequence so any /api/thermostats read
-    -- that was already in flight when this write landed is discarded instead of
-    -- handing the companion the pre-write state.
-    gRefreshIssued = gRefreshIssued + 1
-    gRefreshAccepted = gRefreshIssued
-    gState.devices[serial] = updated
-    handoff(serial)
-    done()
-  end, function(err)
-    log:warn("setThermostat failed for %s: %s", serial, err)
-    done()
+  -- Give the cancelled long-poll a moment to actually release its connection
+  -- before we POST; aborting a transfer does not necessarily free it inline.
+  SetTimer("SchluterWrite_" .. serial, WRITE_DELAY_MS, function()
+    local t0 = os.time()
+    client:setThermostat(serial, settings):next(function(updated)
+      -- Take the next slot in the refresh sequence so any /api/thermostats read
+      -- that was already in flight when this write landed is discarded instead of
+      -- handing the companion the pre-write state.
+      gRefreshIssued = gRefreshIssued + 1
+      gRefreshAccepted = gRefreshIssued
+      gState.devices[serial] = updated
+      handoff(serial)
+      done()
+    end, function(err)
+      log:warn("setThermostat failed for %s after %ds: %s", serial, os.time() - t0, err)
+      done()
+    end)
   end)
 end
 
