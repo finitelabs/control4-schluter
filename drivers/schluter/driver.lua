@@ -301,6 +301,9 @@ end
 --- Grace period between aborting the long-poll and issuing the write. Cancelling
 --- a transfer may not release its connection synchronously.
 local WRITE_DELAY_MS = 600
+--- A write slower than this is worth surfacing: it means the POST was queued
+--- behind the notification connection rather than going out cleanly.
+local SLOW_WRITE_S = 5
 
 -- ─── Login ─────────────────────────────────────────────────────────────────
 
@@ -467,6 +470,10 @@ writeThermostat = function(serial, settings)
       gRefreshAccepted = gRefreshIssued
       gState.devices[serial] = updated
       handoff(serial)
+      local elapsed = os.time() - t0
+      if elapsed >= SLOW_WRITE_S then
+        log:warn("write to %s took %ds (long-poll connection contention)", serial, elapsed)
+      end
       done()
     end, function(err)
       log:warn("setThermostat failed for %s after %ds: %s", serial, os.time() - t0, err)

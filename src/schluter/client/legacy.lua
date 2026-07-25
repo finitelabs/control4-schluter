@@ -32,6 +32,12 @@ local HEADERS = { ["Content-Type"] = "application/json; charset=utf-8" }
 -- at the exact moment it answers. Nothing is lost by expiring early: the cursor
 -- (sequencenr) means the next poll re-delivers anything that happened meanwhile.
 local NOTIFY_TIMEOUT_S = 240
+-- Writes need far longer than lib.http's 30s default. A POST issued while the
+-- controller is holding the notification connection can take tens of seconds
+-- (measured: 17s, 30s, 10s) even though the same request from a workstation
+-- completes in 0.3s. At 30s we were aborting writes that were about to succeed
+-- and reporting them as failures.
+local WRITE_TIMEOUT_S = 120
 
 --- @class SchluterAuthError
 --- @field errorCode number Schluter ErrorCode (1/2 = invalid credentials)
@@ -222,7 +228,7 @@ function Client:setThermostat(serialNumber, settings)
   local d = deferred.new()
   local url = self._host .. "/api/thermostat" .. _query({ sessionid = self._sessionId, serialnumber = serialNumber })
 
-  http:post(url, JSON:encode(_writable(settings)), HEADERS):next(function(response)
+  http:post(url, JSON:encode(_writable(settings)), HEADERS, { timeout = WRITE_TIMEOUT_S }):next(function(response)
     local object, err = _decode(response.body)
     if not object then
       return d:reject(err)
