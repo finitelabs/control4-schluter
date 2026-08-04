@@ -1,0 +1,25 @@
+# Build-time Python dependencies. `make init` installs these into .venv and
+# re-runs whenever this file changes (see the $(VENV_STAMP) rule in Makefile).
+#
+# Keep this list unpinned: the toolchain is developer/CI tooling, not shipped
+# code, and the drivers themselves are Lua.
+
+# Required by the driverpackager (dist/driverpackager).
+M2Crypto
+lxml
+
+# Docs pipeline (tools/docs.py): markdown -> HTML -> PDF.
+weasyprint
+# Repo-local: tools/docs.py in this repo embeds remote images over HTTPS and needs
+# an explicit CA bundle. Not in the template yet (control4-driver-template#20 was
+# closed unmerged), so this line is local drift and will conflict on the next
+# copier update until the template carries it.
+certifi
+markdown-it-py[linkify]
+mdit-py-plugins
+pygments
+
+# Formatters (make fmt). Lua formatting uses the stylua binary, see fmt-lua.
+black
+mdformat
+mdformat-gfm
