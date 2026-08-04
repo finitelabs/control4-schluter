@@ -61,8 +61,6 @@ given.
 
 </div>
 
-<div style="page-break-after: always"></div>
-
 # <span style="color:#f78d1f">System Requirements</span>
 
 - Control4 OS 3.3.0 or later
@@ -214,7 +212,5 @@ https://github.com/finitelabs/control4-schluter/issues/new
 <a href="https://www.buymeacoffee.com/derek.miller" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
 <!-- #endif -->
-
-<div style="page-break-after: always"></div>
 
 <!-- #embed-changelog -->
