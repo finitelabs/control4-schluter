@@ -1,6 +1,18 @@
+-- Schluter DITRA-HEAT thermostat companion driver.
+--
+-- Presents one Schluter (OJ Microline) floor-heating thermostat as a C4
+-- thermostatV2 proxy. It owns no cloud session: the account driver polls the
+-- Schluter cloud and hands the raw thermostat object down over the account
+-- binding (RFP.updateThermostat / RFP.goOffline); writes go back up as
+-- SET_THERMOSTAT commands for the account to POST.
+--
+-- Writes are optimistic: proxy commands mutate the handed-over object, push the
+-- new state to the proxy immediately, and arm a confirm/retry loop that re-POSTs
+-- until the slow (and occasionally lossy) Schluter cloud reflects the change or
+-- a timeout accepts reality.
+
 --#ifdef DRIVERCENTRAL
--- TODO: assign a DriverCentral product id (DC_PID) before releasing to DC.
-DC_PID = nil
+DC_PID = 0 -- TODO: Assign DriverCentral product ID
 DC_X = nil
 DC_FILENAME = "schluter_thermostat.c4z"
 --#endif
@@ -11,10 +23,10 @@ require("drivers-common-public.global.lib")
 require("drivers-common-public.global.timer")
 require("drivers-common-public.global.url")
 
-local log = require("lib.logging")
-local JSON = require("JSON")
+JSON = require("JSON")
 
-local model = require("schluter.thermostat")
+local log = require("lib.logging")
+local Thermostat = require("schluter.thermostat")
 local constants = require("constants")
 
 --- thermostatV2 proxy (this driver's primary proxy).
@@ -24,6 +36,9 @@ local ACCOUNT_BINDING = 5002
 --- Temperature value output connection.
 local TEMP_OUTPUT_BINDING = 5010
 
+--- Set true at the end of OnDriverLateInit, after the boot-time property replay;
+--- OPC.Driver_Status re-pins "Initializing" until then.
+local gInitialized = false
 --- Raw Schluter thermostat object handed over by the account (mutated in place to
 --- build the settings we POST back). `nil` until the first handoff.
 local gDevice = nil
@@ -64,7 +79,7 @@ local function getCelsiusFromParams(tParams)
   end
   local fahrenheit = tonumber(tParams.FAHRENHEIT)
   if fahrenheit ~= nil then
-    return model.fToC(fahrenheit)
+    return Thermostat.fToC(fahrenheit)
   end
   local value = tonumber(tParams.VALUE)
   if value ~= nil then
@@ -72,7 +87,7 @@ local function getCelsiusFromParams(tParams)
     if scale == "C" or scale == "c" or scale == "CELSIUS" then
       return value
     end
-    return model.fToC(value)
+    return Thermostat.fToC(value)
   end
   return nil
 end
@@ -85,12 +100,12 @@ local function pushCapabilities()
   if not gState then
     return
   end
-  local caps = model.capabilities(gState)
+  local caps = Thermostat.capabilities(gState)
   SendToProxy(PROXY_BINDING, "ALLOWED_HVAC_MODES_CHANGED", { MODES = caps.allowedHvacModes }, "NOTIFY")
   -- Populate the hold-modes list; without this the proxy only accepts "Off" and
   -- silently drops "Until Next"/"Permanent" (the static hold_modes cap alone
   -- leaves HOLD_MODES_LIST empty).
-  SendToProxy(PROXY_BINDING, "ALLOWED_HOLD_MODES_CHANGED", { MODES = model.HOLD_MODES }, "NOTIFY")
+  SendToProxy(PROXY_BINDING, "ALLOWED_HOLD_MODES_CHANGED", { MODES = Thermostat.HOLD_MODES }, "NOTIFY")
   SendToProxy(PROXY_BINDING, "DYNAMIC_CAPABILITIES_CHANGED", {
     HAS_SINGLE_SETPOINT = caps.hasSingleSetpoint,
     CAN_HEAT = caps.canHeat,
@@ -102,8 +117,8 @@ local function pushCapabilities()
   SendToProxy(PROXY_BINDING, "DYNAMIC_CAPABILITIES_CHANGED", {
     SETPOINT_HEAT_MIN_C = caps.minSetpointC,
     SETPOINT_HEAT_MAX_C = caps.maxSetpointC,
-    SETPOINT_HEAT_MIN_F = model.round(model.cToF(caps.minSetpointC)),
-    SETPOINT_HEAT_MAX_F = model.round(model.cToF(caps.maxSetpointC)),
+    SETPOINT_HEAT_MIN_F = Thermostat.round(Thermostat.cToF(caps.minSetpointC)),
+    SETPOINT_HEAT_MAX_F = Thermostat.round(Thermostat.cToF(caps.maxSetpointC)),
   }, "NOTIFY")
 end
 
@@ -123,12 +138,12 @@ local function pushState()
     SETPOINT = tostring(gState.setpointC),
     SCALE = "C",
   }, "NOTIFY")
-  SendToProxy(PROXY_BINDING, "HVAC_MODE_CHANGED", { MODE = model.hvacMode(gState) }, "NOTIFY")
-  SendToProxy(PROXY_BINDING, "HVAC_STATE_CHANGED", { STATE = model.hvacState(gState) }, "NOTIFY")
-  SendToProxy(PROXY_BINDING, "HOLD_MODE_CHANGED", { MODE = model.holdMode(gState) }, "NOTIFY")
+  SendToProxy(PROXY_BINDING, "HVAC_MODE_CHANGED", { MODE = Thermostat.hvacMode(gState) }, "NOTIFY")
+  SendToProxy(PROXY_BINDING, "HVAC_STATE_CHANGED", { STATE = Thermostat.hvacState(gState) }, "NOTIFY")
+  SendToProxy(PROXY_BINDING, "HOLD_MODE_CHANGED", { MODE = Thermostat.holdMode(gState) }, "NOTIFY")
   SendToProxy(TEMP_OUTPUT_BINDING, "VALUE_CHANGED", {
     CELSIUS = tostring(gState.temperatureC),
-    FAHRENHEIT = tostring(model.cToF(gState.temperatureC)),
+    FAHRENHEIT = tostring(Thermostat.cToF(gState.temperatureC)),
   })
 end
 
@@ -163,7 +178,7 @@ local function markPending()
   if not gDevice then
     return
   end
-  gPending = { mode = model.currentMode(gDevice), ts = os.time() }
+  gPending = { mode = Thermostat.currentMode(gDevice), ts = os.time() }
   scheduleConfirm()
 end
 
@@ -183,12 +198,12 @@ local COOL_PLACEHOLDER_C = 35
 local function pushScheduleEntry(row)
   local heat, cool, units
   if isCelsius() then
-    heat = model.round(model.normalize(row.tempC))
-    cool = model.round(COOL_PLACEHOLDER_C)
+    heat = Thermostat.round(Thermostat.normalize(row.tempC))
+    cool = Thermostat.round(COOL_PLACEHOLDER_C)
     units = "C"
   else
-    heat = model.round(model.cToF(row.tempC))
-    cool = model.round(model.cToF(COOL_PLACEHOLDER_C))
+    heat = Thermostat.round(Thermostat.cToF(row.tempC))
+    cool = Thermostat.round(Thermostat.cToF(COOL_PLACEHOLDER_C))
     units = "F"
   end
   SendToProxy(PROXY_BINDING, "SCHEDULE_ENTRY_CHANGED", {
@@ -217,7 +232,7 @@ local function pushSchedule()
     return
   end
   gScheduleJson = json
-  for _, row in ipairs(model.scheduleEntries(gDevice)) do
+  for _, row in ipairs(Thermostat.scheduleEntries(gDevice)) do
     pushScheduleEntry(row)
   end
 end
@@ -225,7 +240,7 @@ end
 --- Parse an UPDATE_SCHEDULE_ENTRIES command into edit rows. The thermostatV2
 --- proxy sends an ENTRIES XML blob of <ScheduleEntryUpdate .../> elements (and,
 --- on some versions, flat params). Setpoints arrive in Control4's canonical unit
---- (decikelvin), so convert with model.c4ToC.
+--- (decikelvin), so convert with Thermostat.c4ToC.
 --- @param tParams table
 --- @return table[] edits Each `{ day, entry, minutes, enabled, tempC }`.
 local function parseScheduleEntries(tParams)
@@ -233,16 +248,21 @@ local function parseScheduleEntries(tParams)
   local edits = {}
   local entriesXml = tParams.ENTRIES
   if type(entriesXml) == "string" and entriesXml ~= "" then
-    for attrs in entriesXml:gmatch("<ScheduleEntryUpdate(.-)/?>") do
-      local function attr(name)
-        return attrs:match(name .. '%s*=%s*"([^"]*)"')
-      end
+    -- The blob is a bare sequence of elements, so wrap it in a synthetic root.
+    local tree = ParseXml("<Entries>" .. entriesXml .. "</Entries>")
+    local updates = Select(tree, "Entries", "ScheduleEntryUpdate") or {}
+    if updates._attr ~= nil then
+      -- xml2lua returns a lone element bare rather than as a one-element list.
+      updates = { updates }
+    end
+    for _, update in ipairs(updates) do
+      local a = update._attr or {}
       edits[#edits + 1] = {
-        day = tonumber(attr("DayOfWeek")),
-        entry = tonumber(attr("EntryIndex")),
-        minutes = tonumber(attr("EntryTime")),
-        enabled = tostring(attr("IsEnabled")):lower() == "true",
-        tempC = model.c4ToC(attr("HeatSetpoint")),
+        day = tonumber(a.DayOfWeek),
+        entry = tonumber(a.EntryIndex),
+        minutes = tonumber(a.EntryTime),
+        enabled = toboolean(a.IsEnabled),
+        tempC = Thermostat.c4ToC(a.HeatSetpoint),
       }
     end
   elseif tParams.DAY_INDEX ~= nil then
@@ -251,7 +271,7 @@ local function parseScheduleEntries(tParams)
       entry = tonumber(tParams.ENTRY_INDEX),
       minutes = tonumber(tParams.ENTRY_TIME),
       enabled = toboolean(tParams.ENABLED),
-      tempC = model.c4ToC(tParams.HEAT_SETPOINT),
+      tempC = Thermostat.c4ToC(tParams.HEAT_SETPOINT),
     }
   end
   return edits
@@ -268,7 +288,7 @@ local function applyAndSend(idBinding, mutate)
   -- tens of seconds to apply a change and there may be no handoff until it does,
   -- so without this the UI would sit on the old state (and look like it "didn't
   -- stick"). markPending + the confirm loop keep it from reverting and re-POST.
-  gState = model.fromDevice(gDevice)
+  gState = Thermostat.fromDevice(gDevice)
   pushToAccount()
   markPending()
   pushState()
@@ -281,7 +301,7 @@ local function nextComfortEndTime()
   if not gDevice then
     return nil
   end
-  return model.nextEventEndTime(gDevice, os.time(), model.tzOffsetSeconds(gDevice.TZOffset))
+  return Thermostat.nextEventEndTime(gDevice, os.time(), Thermostat.tzOffsetSeconds(gDevice.TZOffset))
 end
 
 --- @param idBinding integer
@@ -292,46 +312,79 @@ local function handleSetpoint(idBinding, tParams)
     return
   end
   applyAndSend(idBinding, function()
-    model.applySetpoint(gDevice, celsius, nextComfortEndTime())
+    Thermostat.applySetpoint(gDevice, celsius, nextComfortEndTime())
   end)
 end
 
-function RFP.SET_SINGLE_SETPOINT(idBinding, strCommand, tParams)
+function RFP.SET_SINGLE_SETPOINT(idBinding, _strCommand, tParams)
   log:trace("RFP.SET_SINGLE_SETPOINT(%s)", idBinding)
   handleSetpoint(idBinding, tParams)
 end
 
-function RFP.SET_SETPOINT_HEAT(idBinding, strCommand, tParams)
+function RFP.SET_SETPOINT_HEAT(idBinding, _strCommand, tParams)
   log:trace("RFP.SET_SETPOINT_HEAT(%s)", idBinding)
   handleSetpoint(idBinding, tParams)
+end
+
+--- Nudge the heat setpoint by one resolution step in the project's display scale
+--- (0.5 °C / 1 °F, matching driver.xml), clamped to the device's bounds.
+--- @param idBinding integer
+--- @param delta integer +1 or -1
+local function adjustSetpoint(idBinding, delta)
+  if not gState then
+    return
+  end
+  local celsius
+  if isCelsius() then
+    celsius = gState.setpointC + delta * 0.5
+  else
+    celsius = Thermostat.fToC(Thermostat.round(Thermostat.cToF(gState.setpointC)) + delta)
+  end
+  celsius = math.max(gState.minC, math.min(gState.maxC, celsius))
+  applyAndSend(idBinding, function()
+    Thermostat.applySetpoint(gDevice, celsius, nextComfortEndTime())
+  end)
+end
+
+function RFP.INC_SETPOINT_HEAT(idBinding)
+  log:trace("RFP.INC_SETPOINT_HEAT(%s)", idBinding)
+  adjustSetpoint(idBinding, 1)
+end
+
+function RFP.DEC_SETPOINT_HEAT(idBinding)
+  log:trace("RFP.DEC_SETPOINT_HEAT(%s)", idBinding)
+  adjustSetpoint(idBinding, -1)
 end
 
 function RFP.SET_MODE_HEAT(idBinding)
   log:trace("RFP.SET_MODE_HEAT(%s)", idBinding)
   applyAndSend(idBinding, function()
-    model.applyHvacMode(gDevice, "Heat", gDevice.MinTemp)
+    Thermostat.applyHvacMode(gDevice, "Heat", gDevice.MinTemp)
   end)
 end
 
 function RFP.SET_MODE_OFF(idBinding)
   log:trace("RFP.SET_MODE_OFF(%s)", idBinding)
   applyAndSend(idBinding, function()
-    model.applyHvacMode(gDevice, "Off", gDevice.MinTemp)
+    Thermostat.applyHvacMode(gDevice, "Off", gDevice.MinTemp)
   end)
 end
 
-function RFP.SET_MODE_HOLD(idBinding, strCommand, tParams)
+function RFP.SET_MODE_HOLD(idBinding, _strCommand, tParams)
   log:trace("RFP.SET_MODE_HOLD(%s)", tostring((tParams or {}).MODE))
   applyAndSend(idBinding, function()
-    model.applyHold(gDevice, (tParams or {}).MODE, nextComfortEndTime())
+    Thermostat.applyHold(gDevice, (tParams or {}).MODE, nextComfortEndTime())
   end)
 end
 
 --- The proxy reports the project's display scale ("C"/"F"). Track it and re-push
 --- the schedule so its setpoints are in that scale (matching the editor grid).
-function RFP.SET_SCALE(idBinding, strCommand, tParams)
+function RFP.SET_SCALE(idBinding, _strCommand, tParams)
+  if idBinding ~= PROXY_BINDING then
+    return
+  end
   local scale = (tParams or {}).SCALE
-  if scale and scale ~= "" then
+  if not IsEmpty(scale) then
     gScale = scale
   end
   log:trace("RFP.SET_SCALE(%s)", tostring(gScale))
@@ -344,7 +397,7 @@ end
 --- writes the mutated schedule back through the account. The thermostatV2 proxy
 --- sends this as UPDATE_SCHEDULE_ENTRIES (with an ENTRIES XML blob of
 --- <ScheduleEntryUpdate .../> elements).
-function RFP.UPDATE_SCHEDULE_ENTRIES(idBinding, strCommand, tParams)
+function RFP.UPDATE_SCHEDULE_ENTRIES(idBinding, _strCommand, tParams)
   log:trace("RFP.UPDATE_SCHEDULE_ENTRIES(%s)", idBinding)
   if idBinding ~= PROXY_BINDING or not gDevice then
     return
@@ -352,7 +405,7 @@ function RFP.UPDATE_SCHEDULE_ENTRIES(idBinding, strCommand, tParams)
   local affectedDays = {}
   for _, e in ipairs(parseScheduleEntries(tParams)) do
     if e.day ~= nil and e.entry ~= nil and e.tempC ~= nil then
-      local affected = model.applyScheduleEntry(gDevice, e.day, e.entry, e.minutes or 0, e.enabled, e.tempC)
+      local affected = Thermostat.applyScheduleEntry(gDevice, e.day, e.entry, e.minutes or 0, e.enabled, e.tempC)
       for _, c4Day in ipairs(affected) do
         affectedDays[c4Day] = true
       end
@@ -364,9 +417,9 @@ function RFP.UPDATE_SCHEDULE_ENTRIES(idBinding, strCommand, tParams)
   -- Keep each day's six events ordered by time (renumbering ScheduleType) so an
   -- edit always maps back to the correct Schluter event, then re-push every
   -- affected day in full so the C4 editor reflects the sorted order.
-  model.normalizeSchedule(gDevice)
+  Thermostat.normalizeSchedule(gDevice)
   gScheduleJson = nil
-  for _, row in ipairs(model.scheduleEntries(gDevice)) do
+  for _, row in ipairs(Thermostat.scheduleEntries(gDevice)) do
     if affectedDays[row.c4Day] then
       pushScheduleEntry(row)
     end
@@ -380,7 +433,7 @@ RFP.SCHEDULE_ENTRY = RFP.UPDATE_SCHEDULE_ENTRIES
 -- ─── Account handoff handlers (account → this companion) ────────────────────
 
 --- The account hands over the current Schluter thermostat object.
-function RFP.updateThermostat(idBinding, strCommand, tParams)
+function RFP.updateThermostat(idBinding, _strCommand, tParams)
   log:trace("RFP.updateThermostat(%s)", idBinding)
   local ok, device = pcall(JSON.decode, JSON, (tParams or {}).JSON or "")
   if not ok or type(device) ~= "table" then
@@ -388,7 +441,7 @@ function RFP.updateThermostat(idBinding, strCommand, tParams)
   end
   device = device.Thermostat or device
   if gPending and (os.time() - gPending.ts) < CONFIRM_TIMEOUT_S then
-    if model.currentMode(device) == gPending.mode then
+    if Thermostat.currentMode(device) == gPending.mode then
       -- Cloud caught up to our write; trust reality from here on.
       gPending = nil
       gDevice = device
@@ -406,7 +459,7 @@ function RFP.updateThermostat(idBinding, strCommand, tParams)
     gPending = nil
     gDevice = device
   end
-  gState = model.fromDevice(gDevice)
+  gState = Thermostat.fromDevice(gDevice)
   C4:UpdateProperty("Serial ID", gState.serialNumber)
   pushCapabilities()
   pushState()
@@ -414,7 +467,7 @@ function RFP.updateThermostat(idBinding, strCommand, tParams)
 end
 
 --- The thermostat is gone / account logged out.
-function RFP.goOffline(idBinding, strCommand)
+function RFP.goOffline(idBinding, _strCommand)
   log:trace("RFP.goOffline(%s)", idBinding)
   SendToProxy(PROXY_BINDING, "ONLINE_CHANGED", { STATE = false }, "NOTIFY")
   C4:UpdateProperty("Serial ID", "")
@@ -426,10 +479,25 @@ end
 
 function OPC.Log_Level(propertyValue)
   log:setLogLevel(propertyValue)
+  local ultra = log:getLogLevel() >= 6 and log:isPrintEnabled()
+  DEBUGPRINT, DEBUG_TIMER, DEBUG_RFN, DEBUG_URL, DEBUG_WEBSOCKET = ultra, ultra, ultra, ultra, ultra
 end
 
 function OPC.Log_Mode(propertyValue)
   log:setLogMode(propertyValue)
+  CancelTimer("LogMode")
+  if not log:isEnabled() then
+    return
+  end
+  SetTimer("LogMode", 3 * ONE_HOUR, function()
+    UpdateProperty("Log Mode", "Off", true)
+  end)
+end
+
+function OPC.Driver_Status(_v)
+  if not gInitialized then
+    UpdateProperty("Driver Status", "Initializing", false)
+  end
 end
 
 function OPC.Driver_Version()
@@ -443,6 +511,7 @@ function OnDriverInit()
   --#else
   C4:AllowExecute(true)
   --#endif
+  gInitialized = false
   log:setLogName(C4:GetDeviceData(C4:GetDeviceID(), "name"))
   log:setLogLevel(Properties["Log Level"])
   log:setLogMode(Properties["Log Mode"])
@@ -451,7 +520,18 @@ end
 
 function OnDriverLateInit()
   log:trace("OnDriverLateInit()")
-  C4:UpdateProperty("Driver Version", C4:GetDriverConfigInfo("version"))
+  if not CheckMinimumVersion("Driver Status") then
+    return
+  end
+  for p, _ in pairs(Properties) do
+    local status, err = pcall(OnPropertyChanged, p)
+    if not status and err then
+      log:error("Error in OnPropertyChanged for property '%s': %s", p, err)
+    end
+  end
+  gInitialized = true
+  -- Settle Driver Status now that init is done; the replay above left it at
+  -- "Initializing" via the OPC.Driver_Status guard.
   C4:UpdateProperty("Driver Status", "Waiting for thermostat")
   SendToProxy(PROXY_BINDING, "ONLINE_CHANGED", { STATE = false }, "NOTIFY")
 end

@@ -55,9 +55,9 @@
       </property>
       <!-- #endif -->
       <property>
-        <name>Account</name>
+        <name>Account Settings</name>
         <type>LABEL</type>
-        <default>Schluter Account</default>
+        <default>Account Settings</default>
       </property>
       <property>
         <name>Email</name>
@@ -131,6 +131,10 @@
         <command>Refresh_Thermostats</command>
       </action>
       <action>
+        <name>Reconnect</name>
+        <command>Reconnect</command>
+      </action>
+      <action>
         <name>Reset Driver</name>
         <command>Reset_Driver</command>
         <params>
@@ -146,4 +150,5 @@
       </action>
     </actions>
   </config>
+  <connections/>
 </devicedata>

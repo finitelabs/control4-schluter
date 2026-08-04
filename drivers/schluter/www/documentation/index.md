@@ -41,7 +41,9 @@ driver talks to the same REST API the Schluter DITRA-HEAT WiFi app uses.
 <div style="font-size: small">
 
 - [System Requirements](#system-requirements)
-- [Features](#features)
+- [Included Drivers](#included-drivers)
+  - [Schluter](#schluter)
+  - [Schluter Thermostat](#schluter-thermostat)
 - [Compatibility](#compatibility)
 - [Installer Setup](#installer-setup)
   <!-- #ifdef DRIVERCENTRAL -->
@@ -74,12 +76,31 @@ driver talks to the same REST API the Schluter DITRA-HEAT WiFi app uses.
   the [Schluter DITRA-HEAT WiFi app](https://ditra-heat-e-wifi.schluter.com)
 - Internet access from the Control4 controller
 
-# <span style="color:#f78d1f">Features</span>
+# <span style="color:#f78d1f">Included Drivers</span>
+
+## Schluter
+
+The account driver, and the driver to add first. Enter your Schluter DITRA-HEAT
+WiFi account email and password and it signs in to the cloud, discovers every
+thermostat on the account, and creates a connection for each one. The **Schluter
+Thermostat** drivers bind to those connections, so the account driver is the
+only place credentials are entered and the only cloud connection that is opened.
+
+**Key features:**
 
 - Cloud sign-in with your Schluter DITRA-HEAT WiFi email and password
 - Automatic discovery of every thermostat on the account
 - One connection per thermostat, each bound to a companion thermostat driver
 - Real-time state updates via the cloud's push notifications (no polling delay)
+
+## Schluter Thermostat
+
+The companion driver — add one per physical thermostat and bind it to a
+thermostat connection on the account driver. Each one appears in Control4 as a
+native thermostat with setpoint, mode, and schedule control.
+
+**Key features:**
+
 - Setpoint, Heat/Off mode, and hold control
 - Full weekly schedule read and edit through the native Control4 thermostat
   scheduling UI
@@ -92,6 +113,10 @@ This driver works with Schluter DITRA-HEAT-E-WiFi thermostats (DITRA-HEAT-E-RS1
 / DITRA-HEAT-E-RT1) managed through the Schluter DITRA-HEAT WiFi app. Because
 Schluter DITRA-HEAT shares the OJ Electronics cloud platform with sibling
 brands, the underlying API is the same one used by those apps.
+
+If you have a model that works and is not listed, please
+[open an issue](https://github.com/finitelabs/control4-schluter/issues/new) so
+it can be added.
 
 # <span style="color:#f78d1f">Installer Setup</span>
 
@@ -131,8 +156,7 @@ is an outline of the basic steps for your convenience.
 
 1. Use the "Search" tab to find the "Schluter" driver and add it to your
    project.
-
-   ![Search Drivers](images/search-drivers.png)
+   <br><img alt="Search Drivers" src="./images/search-drivers.png" width="300"/>
 
 1. Select the newly added driver in the "System Design" tab. You will notice
    that the `Cloud Status` reflects the license state. If you have purchased a
@@ -167,8 +191,7 @@ is an outline of the basic steps for your convenience.
 
 1. Use the "Search" tab to find the "Schluter" driver and add it to your
    project.
-
-   ![Search Drivers](images/search-drivers.png)
+   <br><img alt="Search Drivers" src="./images/search-drivers.png" width="300"/>
 
 1. Configure the [Account Settings](#account-settings) with your Schluter email
    and password.
@@ -184,6 +207,10 @@ is an outline of the basic steps for your convenience.
    driver and bind each discovered thermostat to a "Schluter Thermostat" driver.
 
 <!-- #endif -->
+
+Each companion driver includes its own documentation accessible from within
+Composer Pro. Refer to the **Schluter Thermostat** driver documentation for its
+property, connection, and programming reference.
 
 ## Driver Setup
 
@@ -262,6 +289,12 @@ the current version.
 
 Re-reads the account and refreshes the discovered thermostats and their
 connection bindings.
+
+#### Reconnect
+
+Signs out and logs back in to the Schluter cloud without touching connection
+bindings or cached thermostats. Use this to recover from a stuck session without
+losing programming.
 
 #### Reset Driver
 

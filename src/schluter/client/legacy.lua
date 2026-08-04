@@ -52,35 +52,14 @@ Client.__index = Client
 --- @return SchluterLegacyClient
 function Client:new(config)
   config = config or {}
-  return setmetatable({
-    _sessionId = nil,
-    _host = config.host or DEFAULT_HOST,
-    _applicationId = config.applicationId,
-    --- Transfer handle for the in-flight notification long-poll, so it can be
-    --- aborted when a write needs the connection (see cancelNotification).
-    _notifyTransfer = nil,
-  }, self)
-end
-
---- Percent-encode a string (RFC 3986 unreserved set). Self-contained because
---- C4:URLEncode is not present on all controller OS versions.
---- @param s string|number
---- @return string
-local function _urlEncode(s)
-  return (tostring(s):gsub("[^%w%-_%.~]", function(c)
-    return string.format("%%%02X", string.byte(c))
-  end))
-end
-
---- Build a `?a=b&c=d` query string from a table (values URL-encoded).
---- @param params table<string, string|number>
---- @return string
-local function _query(params)
-  local parts = {}
-  for k, v in pairs(params) do
-    parts[#parts + 1] = tostring(k) .. "=" .. _urlEncode(v)
-  end
-  return "?" .. table.concat(parts, "&")
+  local instance = setmetatable({}, self)
+  instance._sessionId = nil
+  instance._host = config.host or DEFAULT_HOST
+  instance._applicationId = config.applicationId
+  --- Transfer handle for the in-flight notification long-poll, so it can be
+  --- aborted when a write needs the connection (see cancelNotification).
+  instance._notifyTransfer = nil
+  return instance
 end
 
 --- Coerce a response body to a decoded table. lib.http (via drivers-common-public
@@ -120,7 +99,7 @@ function Client:authenticate(email, password)
     if not object then
       return d:reject({ errorCode = -1, message = err })
     end
-    if object.ErrorCode == 0 and object.SessionId and object.SessionId ~= "" then
+    if object.ErrorCode == 0 and not IsEmpty(object.SessionId) then
       self._sessionId = object.SessionId
       return d:resolve(true)
     end
@@ -156,7 +135,8 @@ end
 --- @return Deferred<table[], any>
 function Client:getThermostats()
   log:trace("legacy:getThermostats()")
-  return self:_getJson("/api/thermostats" .. _query({ sessionid = self._sessionId })):next(function(result)
+  local url = MakeURL(self._host .. "/api/thermostats", { sessionid = self._sessionId })
+  return self:_getJson(url):next(function(result)
     -- Normalize to a bare array of thermostat objects. Schluter returns
     -- `Thermostats`; Schluter wraps them in `Groups[].Thermostats`.
     if type(result.Groups) == "table" then
@@ -177,11 +157,10 @@ end
 --- @return Deferred<table, any>
 function Client:getThermostat(serialNumber)
   log:trace("legacy:getThermostat(%s)", serialNumber)
-  return self
-    :_getJson("/api/thermostat" .. _query({ sessionid = self._sessionId, serialnumber = serialNumber }))
-    :next(function(result)
-      return result.Thermostat or result
-    end)
+  local url = MakeURL(self._host .. "/api/thermostat", { sessionid = self._sessionId, serialnumber = serialNumber })
+  return self:_getJson(url):next(function(result)
+    return result.Thermostat or result
+  end)
 end
 
 --- The only fields the server accepts on a write. Taken from the official app,
@@ -226,7 +205,7 @@ end
 function Client:setThermostat(serialNumber, settings)
   log:trace("legacy:setThermostat(%s)", serialNumber)
   local d = deferred.new()
-  local url = self._host .. "/api/thermostat" .. _query({ sessionid = self._sessionId, serialnumber = serialNumber })
+  local url = MakeURL(self._host .. "/api/thermostat", { sessionid = self._sessionId, serialnumber = serialNumber })
 
   http:post(url, JSON:encode(_writable(settings)), HEADERS, { timeout = WRITE_TIMEOUT_S }):next(function(response)
     local object, err = _decode(response.body)
@@ -302,20 +281,19 @@ end
 function Client:getNotification(sequenceNr)
   log:trace("legacy:getNotification(seq=%s)", sequenceNr)
   local d = deferred.new()
-  local path = "/api/notification" .. _query({ sessionid = self._sessionId, sequencenr = sequenceNr })
-  local url = self._host .. path
+  local url = MakeURL(self._host .. "/api/notification", { sessionid = self._sessionId, sequencenr = sequenceNr })
 
   local transfer = urlDo("GET", url, nil, HEADERS, function(strError, responseCode, _headers, responseBody)
     self._notifyTransfer = nil
     if strError or IsEmpty(responseCode) or responseCode < 200 or responseCode >= 300 then
       if responseCode == 401 then
-        log:info("session rejected (401) on notification; clearing it")
+        log:info("Session rejected (401) on notification; clearing it")
         self:logout()
       end
       return d:reject(
         string.format(
           "GET %s failed%s%s",
-          path,
+          url,
           not IsEmpty(responseCode) and (" with status code " .. responseCode) or "",
           not IsEmpty(strError) and ("; " .. strError) or ""
         )
@@ -354,12 +332,12 @@ end
 -- ─── Internals ─────────────────────────────────────────────────────────────
 
 --- Shared GET → decode-JSON helper.
---- @param path string Path beginning with `/api/...` (query string included).
+--- @param url string Full request URL (query string included).
 --- @param options table|nil Optional http request options (e.g. timeout).
 --- @return Deferred<table, any>
-function Client:_getJson(path, options)
+function Client:_getJson(url, options)
   local d = deferred.new()
-  http:get(self._host .. path, HEADERS, options):next(function(response)
+  http:get(url, HEADERS, options):next(function(response)
     local object, err = _decode(response.body)
     if not object then
       return d:reject(err)
@@ -371,11 +349,11 @@ function Client:_getJson(path, options)
     -- this the driver would retry forever against a session the server has
     -- already forgotten.
     if type(errorResponse) == "table" and errorResponse.code == 401 then
-      log:info("session rejected (401); clearing it so the driver re-authenticates")
+      log:info("Session rejected (401); clearing it so the driver re-authenticates")
       self:logout()
     end
     local detail = type(errorResponse) == "table" and errorResponse.error or errorResponse
-    d:reject("GET " .. path .. " failed: " .. tostring(detail))
+    d:reject("GET " .. url .. " failed: " .. tostring(detail))
   end)
   return d
 end
