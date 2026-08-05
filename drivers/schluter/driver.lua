@@ -75,6 +75,12 @@ local gRefreshAccepted = 0
 --- from firing while Composer loads the initial property values.
 local gInitialized = false
 
+--- True from the moment a login is armed until its authenticate settles. The
+--- write path checks this before resuming the long-poll: reopening it while a
+--- login is waiting out its grace period (or is mid-POST) hands authenticate
+--- the connection contention the grace period exists to avoid.
+local gLoginPending = false
+
 --- All schluter account instances on this controller, sorted by device id. Used
 --- for leader election (lowest id is the leader that runs updates).
 --- @return integer[]
@@ -313,18 +319,30 @@ local WRITE_DELAY_MS = 600
 --- behind the notification connection rather than going out cleanly.
 local SLOW_WRITE_S = 5
 
+--- Backoff after a login that failed for a retryable reason, and the ceiling it
+--- grows to. Deliberately slower than the notification ladder: a login is a
+--- credentialed POST, not a poll, so there is no reason to hammer it.
+local LOGIN_RETRY_S = 5
+local LOGIN_RETRY_MAX_S = 300
+
 -- ─── Login ─────────────────────────────────────────────────────────────────
 
-login = function()
+--- @param retryBackoffS number|nil Delay before the next attempt if this one
+--- fails retryably, doubling up to LOGIN_RETRY_MAX_S. Omitted by every
+--- user-initiated login (init, a credential edit, Reconnect), which starts the
+--- ladder over; only the retry timer below passes it.
+login = function(retryBackoffS)
   -- Stop first, before the checks below can short-circuit, so no earlier
   -- generation keeps polling behind an "Awaiting credentials" or failed login.
   -- suspendNotifications (not a bare generation bump) because authenticate()
   -- POSTs, and a POST will not run alongside the held long-poll: the same
   -- contention the write path measured. Also drop any login already armed
-  -- below, so the newest call wins.
+  -- below, and any pending retry, so the newest call wins.
   suspendNotifications()
   CancelTimer("SchluterReconcile")
   CancelTimer("SchluterLogin")
+  CancelTimer("SchluterLoginRetry")
+  gLoginPending = false
   local email = Properties["Email"]
   local password = Properties["Password"]
   if IsEmpty(email) or IsEmpty(password) then
@@ -338,8 +356,10 @@ login = function()
   -- Same grace period the write path uses: aborting the long-poll does not
   -- necessarily release its connection inline. Status is already updated, so
   -- the UI does not wait on this.
+  gLoginPending = true
   SetTimer("SchluterLogin", WRITE_DELAY_MS, function()
     client:authenticate(email, password):next(function()
+      gLoginPending = false
       gState.sequenceNr = 0
       C4:UpdateProperty("Login Status", "Logged In")
       refreshThermostats()
@@ -347,10 +367,27 @@ login = function()
       -- Reconcile regardless of the notification stream (see RECONCILE_INTERVAL_S).
       SetTimer("SchluterReconcile", RECONCILE_INTERVAL_S * ONE_SECOND, refreshThermostats, true)
     end, function(err)
+      gLoginPending = false
       client:logout()
       C4:UpdateProperty("Login Status", err.message or "Login failed")
-      C4:UpdateProperty("Driver Status", "Not connected")
       log:warn("Login failed: %s", err.message)
+      -- ErrorCode 1/2 is the server rejecting the credentials themselves (see
+      -- Client:authenticate). Retrying replays a known-bad password and risks
+      -- the account being locked, and editing Email or Password re-fires login
+      -- on its own, so stop here. Everything else is a transport or server-side
+      -- failure, where stopping leaves the driver at "Not connected" for the
+      -- rest of the controller's uptime with every companion offline. The case
+      -- that motivates this is a controller rebooting after a power cut and
+      -- reaching OnDriverLateInit before the WAN is up.
+      if err.errorCode == 1 or err.errorCode == 2 then
+        C4:UpdateProperty("Driver Status", "Not connected")
+        return
+      end
+      local delay = retryBackoffS or LOGIN_RETRY_S
+      C4:UpdateProperty("Driver Status", string.format("Not connected; retrying in %ds", delay))
+      SetTimer("SchluterLoginRetry", delay * ONE_SECOND, function()
+        login(math.min(delay * 2, LOGIN_RETRY_MAX_S))
+      end)
     end)
   end)
 end
@@ -429,7 +466,9 @@ function OnDriverDestroyed()
   CancelTimer("SchluterNotify")
   CancelTimer("SchluterReconcile")
   CancelTimer("SchluterLogin")
+  CancelTimer("SchluterLoginRetry")
   CancelTimer("UpdateCheck")
+  gLoginPending = false
   if type(client.cancelNotification) == "function" then
     client:cancelNotification()
   end
@@ -526,7 +565,11 @@ writeThermostat = function(serial, settings)
       writeThermostat(serial, queued)
       return
     end
-    if next(gWriteInFlight) == nil then
+    -- Not while a login is armed or in flight: resuming the poll here would
+    -- hand authenticate() the held connection back, which is exactly what
+    -- login()'s grace period is trying to keep clear. The login's own success
+    -- handler restarts the stream.
+    if next(gWriteInFlight) == nil and not gLoginPending then
       restartNotifications()
     end
   end
