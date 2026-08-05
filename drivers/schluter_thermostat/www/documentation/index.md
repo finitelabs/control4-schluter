@@ -28,8 +28,8 @@ ______________________________________________________________________
 
 This driver represents a single Schluter DITRA-HEAT floor-heating thermostat as
 a native Control4 thermostat, through the Control4 ThermostatV2 proxy. It does
-not talk to the cloud itself — it binds to the **Schluter** account driver,
-which hands it the device and its live state. The driver adapts its capabilities
+not talk to the cloud itself. It binds to the **Schluter** account driver, which
+hands it the device and its live state. The driver adapts its capabilities
 (heat-only, heat setpoint, temperature range, schedule) to the device it is
 given.
 
@@ -76,7 +76,7 @@ given.
 - Capabilities (setpoint range, schedule) adapt automatically to the bound
   device
 - Floor temperature exposed as a temperature-value connection for other drivers
-- Temperature values communicated in Celsius — the Control4 proxy handles
+- Temperature values communicated in Celsius, with the Control4 proxy handling
   display conversion to the project's configured scale
 
 # <span style="color:#f78d1f">Compatibility</span>

@@ -39,17 +39,19 @@ Client.__index = Client
 --- @return SchluterOAuthClient
 function Client:new(config)
   config = config or {}
-  return setmetatable({
-    _clientId = config.clientId,
-    _clientSecret = config.clientSecret,
-    _scopes = config.scopes or SCOPES,
-    _apiBase = config.apiBase or API_BASE,
-    _email = nil,
-    _password = nil,
-    _accessToken = nil,
-    _refreshToken = nil,
-    _expiresAt = 0,
-  }, self)
+  local instance = setmetatable({}, self)
+  instance._clientId = config.clientId
+  instance._clientSecret = config.clientSecret
+  instance._scopes = config.scopes or SCOPES
+  instance._apiBase = config.apiBase or API_BASE
+  instance._email = nil
+  instance._password = nil
+  instance._accessToken = nil
+  instance._refreshToken = nil
+  instance._expiresAt = 0
+  --- Timer id for the pending poll shim, so cancelNotification can abort it.
+  instance._pollTimerId = "SchluterOAuthPoll"
+  return instance
 end
 
 -- ─── Auth / token ──────────────────────────────────────────────────────────
@@ -166,7 +168,9 @@ end
 function Client:setThermostat(serialNumber, settings)
   log:trace("oauth:setThermostat(%s)", serialNumber)
   if type(settings.Schedules) == "table" then
-    return self:setSchedule(serialNumber, settings.Schedules)
+    return self:setSchedule(serialNumber, settings.Schedules):next(function()
+      return settings
+    end)
   end
   -- PUT /api/v1/Thermostat sets hold/mode. Map canonical ScheduleMode/SetPointTemp.
   local body = {
@@ -174,8 +178,18 @@ function Client:setThermostat(serialNumber, settings)
     scheduleMode = settings.ScheduleMode,
     setPointTemp = settings.SetPointTemp, -- TODO(oauth): confirm field name + units
   }
-  return self:_request("PUT", "/api/v1/Thermostat", body):next(function()
-    return self:getThermostat(serialNumber)
+  return self:_request("PUT", "/api/v1/Thermostat", body):next(function(response)
+    -- No per-write readback: resolve with the device if the response carries
+    -- one, otherwise with the settings just written — they already hold the
+    -- post-write state on every field the caller reads, and the account
+    -- reconciles against the cloud on its normal refresh path. A follow-up GET
+    -- here would report a *write* failure for a read that failed after the
+    -- write had already succeeded, and typically returns pre-write state
+    -- anyway (the cloud applies writes over tens of seconds).
+    if type(response) == "table" and response.serialNumber ~= nil then
+      return self:_thermostatToCanonical(response)
+    end
+    return settings
   end)
 end
 
@@ -196,8 +210,12 @@ end
 function Client:setSchedule(serialNumber, schedules)
   log:trace("oauth:setSchedule(%s)", serialNumber)
   local body = self:_scheduleFromCanonical(serialNumber, schedules)
-  return self:_request("PUT", "/api/v1/Schedule", body):next(function()
-    return self:getThermostat(serialNumber)
+  return self:_request("PUT", "/api/v1/Schedule", body):next(function(response)
+    -- Same no-readback rule as setThermostat: resolve with what was written.
+    if type(response) == "table" and response.serialNumber ~= nil then
+      return self:_thermostatToCanonical(response)
+    end
+    return { SerialNumber = serialNumber, Schedules = schedules }
   end)
 end
 
@@ -210,10 +228,18 @@ end
 function Client:getNotification(sequenceNr)
   log:trace("oauth:getNotification(seq=%s)", sequenceNr)
   local d = deferred.new()
-  C4:SetTimer(POLL_INTERVAL_MS, function()
+  SetTimer(self._pollTimerId, POLL_INTERVAL_MS, function()
     d:resolve({ SequenceNr = (tonumber(sequenceNr) or 0) + 1 })
   end)
   return d
+end
+
+--- Cancel the pending poll shim, so the account's suspendNotifications() hook
+--- works against this backend too. The pending Deferred is simply never
+--- resolved; the caller's loop generation has already been retired.
+function Client:cancelNotification()
+  log:trace("oauth:cancelNotification()")
+  CancelTimer(self._pollTimerId)
 end
 
 -- ─── Model translation (OpenAPI ⇄ canonical Schluter shape) ──────────────────
@@ -288,15 +314,10 @@ end
 --- @param form table<string, string>
 --- @return string
 function Client:_encodeForm(form)
-  local function enc(s)
-    return (tostring(s):gsub("[^%w%-_%.~]", function(c)
-      return string.format("%%%02X", string.byte(c))
-    end))
-  end
   local parts = {}
   for k, v in pairs(form) do
     if v ~= nil then
-      parts[#parts + 1] = tostring(k) .. "=" .. enc(v)
+      parts[#parts + 1] = URLEncode(tostring(k)) .. "=" .. URLEncode(tostring(v))
     end
   end
   return table.concat(parts, "&")
@@ -332,6 +353,15 @@ function Client:_request(method, path, body)
       d:resolve(decoded)
     end
     local onErr = function(errorResponse)
+      -- The identity server can revoke a token before _expiresAt (password
+      -- change, server-side logout). Drop the dead access token — keeping the
+      -- refresh token so _ensureToken tries a refresh_token grant first — so
+      -- isAuthenticated() goes false and the next request re-acquires instead
+      -- of replaying the dead bearer token until it would have expired.
+      if type(errorResponse) == "table" and errorResponse.code == 401 then
+        log:info("Access token rejected (401); clearing it so the next request re-acquires")
+        self._accessToken, self._expiresAt = nil, 0
+      end
       local detail = type(errorResponse) == "table" and errorResponse.error or errorResponse
       d:reject(method .. " " .. path .. " failed: " .. tostring(detail))
     end

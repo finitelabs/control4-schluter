@@ -1,11 +1,18 @@
+-- Schluter account coordinator.
+--
+-- Owns the single cloud session for the whole Schluter (DITRA-HEAT) account,
+-- discovers the account's thermostats, and exposes a dynamic PROXY binding per
+-- thermostat that the schluter_thermostat companion drivers bind to. Companions
+-- receive the full thermostat object over the binding (UPDATE_THERMOSTAT) and
+-- push mutated settings back (setThermostat); the coordinator runs the
+-- notification long-poll and serializes/coalesces companion writes because the
+-- cloud host will not run a POST alongside the long-poll it holds open.
+
 --#ifdef DRIVERCENTRAL
--- TODO: assign a DriverCentral product id (DC_PID) before releasing to DC.
-DC_PID = nil
+DC_PID = 0 -- TODO: Assign DriverCentral product ID
 DC_X = nil
 DC_FILENAME = "schluter.c4z"
---#endif
-
---#ifndef DRIVERCENTRAL
+--#else
 DRIVER_GITHUB_REPO = "finitelabs/control4-schluter"
 DRIVER_FILENAMES = {
   "schluter.c4z",
@@ -19,12 +26,13 @@ require("drivers-common-public.global.lib")
 require("drivers-common-public.global.timer")
 require("drivers-common-public.global.url")
 
+JSON = require("JSON")
+
 local log = require("lib.logging")
 local bindings = require("lib.bindings")
 --#ifndef DRIVERCENTRAL
 local githubUpdater = require("lib.github-updater")
 --#endif
-local JSON = require("JSON")
 
 local clientFactory = require("schluter.client")
 local constants = require("constants")
@@ -66,6 +74,12 @@ local gRefreshAccepted = 0
 --- Set true once OnDriverLateInit finishes; guards the property-sync handlers
 --- from firing while Composer loads the initial property values.
 local gInitialized = false
+
+--- True from the moment a login is armed until its authenticate settles. The
+--- write path checks this before resuming the long-poll: reopening it while a
+--- login is waiting out its grace period (or is mid-POST) hands authenticate
+--- the connection contention the grace period exists to avoid.
+local gLoginPending = false
 
 --- All schluter account instances on this controller, sorted by device id. Used
 --- for leader election (lowest id is the leader that runs updates).
@@ -214,7 +228,7 @@ armNotifications = function(generation, backoffS)
   if not client:isAuthenticated() then
     -- The session expired (a 401 clears it in the client). Log in again; a
     -- successful login restarts the loop on a fresh generation.
-    log:info("no valid session; re-authenticating")
+    log:info("No valid session; re-authenticating")
     login()
     return
   end
@@ -305,41 +319,84 @@ local WRITE_DELAY_MS = 600
 --- behind the notification connection rather than going out cleanly.
 local SLOW_WRITE_S = 5
 
+--- Backoff after a login that failed for a retryable reason, and the ceiling it
+--- grows to. Deliberately slower than the notification ladder: a login is a
+--- credentialed POST, not a poll, so there is no reason to hammer it.
+local LOGIN_RETRY_S = 5
+local LOGIN_RETRY_MAX_S = 300
+
 -- ─── Login ─────────────────────────────────────────────────────────────────
 
-login = function()
+--- @param retryBackoffS number|nil Delay before the next attempt if this one
+--- fails retryably, doubling up to LOGIN_RETRY_MAX_S. Omitted by every
+--- user-initiated login (init, a credential edit, Reconnect), which starts the
+--- ladder over; only the retry timer below passes it.
+login = function(retryBackoffS)
+  -- Stop first, before the checks below can short-circuit, so no earlier
+  -- generation keeps polling behind an "Awaiting credentials" or failed login.
+  -- suspendNotifications (not a bare generation bump) because authenticate()
+  -- POSTs, and a POST will not run alongside the held long-poll: the same
+  -- contention the write path measured. Also drop any login already armed
+  -- below, and any pending retry, so the newest call wins.
+  suspendNotifications()
+  CancelTimer("SchluterReconcile")
+  CancelTimer("SchluterLogin")
+  CancelTimer("SchluterLoginRetry")
+  gLoginPending = false
   local email = Properties["Email"]
   local password = Properties["Password"]
-  if not email or email == "" or not password or password == "" then
+  if IsEmpty(email) or IsEmpty(password) then
+    client:logout()
     C4:UpdateProperty("Login Status", "Enter email and password")
     C4:UpdateProperty("Driver Status", "Awaiting credentials")
     return
   end
   C4:UpdateProperty("Login Status", "Logging in...")
   C4:UpdateProperty("Driver Status", "Connecting")
-  client:authenticate(email, password):next(function()
-    gState.sequenceNr = 0
-    C4:UpdateProperty("Login Status", "Logged In")
-    refreshThermostats()
-    restartNotifications()
-    -- Reconcile regardless of the notification stream (see RECONCILE_INTERVAL_S).
-    SetTimer("SchluterReconcile", RECONCILE_INTERVAL_S * ONE_SECOND, refreshThermostats, true)
-  end, function(err)
-    client:logout()
-    gNotifyGeneration = gNotifyGeneration + 1
-    CancelTimer("SchluterNotify")
-    CancelTimer("SchluterReconcile")
-    C4:UpdateProperty("Login Status", err.message or "Login failed")
-    C4:UpdateProperty("Driver Status", "Not connected")
-    log:warn("login failed: %s", err.message)
+  -- Same grace period the write path uses: aborting the long-poll does not
+  -- necessarily release its connection inline. Status is already updated, so
+  -- the UI does not wait on this.
+  gLoginPending = true
+  SetTimer("SchluterLogin", WRITE_DELAY_MS, function()
+    client:authenticate(email, password):next(function()
+      gLoginPending = false
+      gState.sequenceNr = 0
+      C4:UpdateProperty("Login Status", "Logged In")
+      refreshThermostats()
+      restartNotifications()
+      -- Reconcile regardless of the notification stream (see RECONCILE_INTERVAL_S).
+      SetTimer("SchluterReconcile", RECONCILE_INTERVAL_S * ONE_SECOND, refreshThermostats, true)
+    end, function(err)
+      gLoginPending = false
+      client:logout()
+      C4:UpdateProperty("Login Status", err.message or "Login failed")
+      log:warn("Login failed: %s", err.message)
+      -- ErrorCode 1/2 is the server rejecting the credentials themselves (see
+      -- Client:authenticate). Retrying replays a known-bad password and risks
+      -- the account being locked, and editing Email or Password re-fires login
+      -- on its own, so stop here. Everything else is a transport or server-side
+      -- failure, where stopping leaves the driver at "Not connected" for the
+      -- rest of the controller's uptime with every companion offline. The case
+      -- that motivates this is a controller rebooting after a power cut and
+      -- reaching OnDriverLateInit before the WAN is up.
+      if err.errorCode == 1 or err.errorCode == 2 then
+        C4:UpdateProperty("Driver Status", "Not connected")
+        return
+      end
+      local delay = retryBackoffS or LOGIN_RETRY_S
+      C4:UpdateProperty("Driver Status", string.format("Not connected; retrying in %ds", delay))
+      SetTimer("SchluterLoginRetry", delay * ONE_SECOND, function()
+        login(math.min(delay * 2, LOGIN_RETRY_MAX_S))
+      end)
+    end)
   end)
 end
 
 --#ifndef DRIVERCENTRAL
 --- Update the driver(s) from the GitHub repository.
 --- @param forceUpdate? boolean Force the update even if already up to date.
-local function updateDrivers(forceUpdate)
-  log:trace("updateDrivers(%s)", forceUpdate)
+function UpdateDrivers(forceUpdate)
+  log:trace("UpdateDrivers(%s)", forceUpdate)
   githubUpdater
     :updateAll(DRIVER_GITHUB_REPO, DRIVER_FILENAMES, Properties["Update Channel"] == "Prerelease", forceUpdate)
     :next(function(updatedDrivers)
@@ -347,7 +404,7 @@ local function updateDrivers(forceUpdate)
         log:info("Updated driver(s): %s", table.concat(updatedDrivers, ","))
       end
     end, function(err)
-      log:warn("driver update failed: %s", err)
+      log:warn("Driver update failed: %s", err)
     end)
 end
 --#endif
@@ -361,48 +418,102 @@ function OnDriverInit()
   --#else
   C4:AllowExecute(true)
   --#endif
+  gInitialized = false
   log:setLogName(C4:GetDeviceData(C4:GetDeviceID(), "name"))
   log:setLogLevel(Properties["Log Level"])
   log:setLogMode(Properties["Log Mode"])
   log:trace("OnDriverInit()")
+
+  -- Re-add persisted dynamic bindings. This must happen here, not in
+  -- OnDriverLateInit: Director resolves stored connections before LateInit
+  -- (see src/lib/bindings.lua).
+  bindings:restoreBindings()
 end
 
 function OnDriverLateInit()
   log:trace("OnDriverLateInit()")
-  bindings:restoreBindings()
-  C4:UpdateProperty("Driver Version", C4:GetDriverConfigInfo("version"))
-  C4:UpdateProperty("Driver Status", "Initializing")
-  login()
+  if not CheckMinimumVersion("Driver Status") then
+    return
+  end
+  C4:FileSetDir("c29tZXNwZWNpYWxrZXk=++11")
+
+  for p, _ in pairs(Properties) do
+    local ok, err = pcall(OnPropertyChanged, p)
+    if not ok then
+      log:error("OnPropertyChanged('%s') failed: %s", p, tostring(err))
+    end
+  end
+
   --#ifndef DRIVERCENTRAL
   -- Auto-update: only the leader account instance checks, at most every 30 min,
   -- and only when Automatic Updates is On. The DriverCentral build lets
   -- cloud-client-byte own updates instead.
-  SetTimer("AutoUpdate", 30 * ONE_MINUTE, function()
+  SetTimer("UpdateCheck", 30 * ONE_MINUTE, function()
     local isLeader = Select(getAccountDriverIds(), 1) == C4:GetDeviceID()
     if isLeader and toboolean(Properties["Automatic Updates"]) then
       log:info("Checking for driver update (leader instance)")
-      updateDrivers()
+      UpdateDrivers()
     end
   end, true)
   --#endif
+
   gInitialized = true
+  login()
+end
+
+function OnDriverDestroyed()
+  gNotifyGeneration = gNotifyGeneration + 1
+  CancelTimer("SchluterNotify")
+  CancelTimer("SchluterReconcile")
+  CancelTimer("SchluterLogin")
+  CancelTimer("SchluterLoginRetry")
+  CancelTimer("UpdateCheck")
+  gLoginPending = false
+  if type(client.cancelNotification) == "function" then
+    client:cancelNotification()
+  end
 end
 
 -- ─── Property handlers (OPC dispatch) ──────────────────────────────────────
 
+function OPC.Driver_Status(_v)
+  if not gInitialized then
+    UpdateProperty("Driver Status", "Initializing", false)
+  end
+end
+
+function OPC.Driver_Version(_v)
+  C4:UpdateProperty("Driver Version", C4:GetDriverConfigInfo("version"))
+end
+
 function OPC.Log_Level(propertyValue)
   log:setLogLevel(propertyValue)
+  local ultra = log:getLogLevel() >= 6 and log:isPrintEnabled()
+  DEBUGPRINT, DEBUG_TIMER, DEBUG_RFN, DEBUG_URL, DEBUG_WEBSOCKET = ultra, ultra, ultra, ultra, ultra
 end
 
 function OPC.Log_Mode(propertyValue)
   log:setLogMode(propertyValue)
+  CancelTimer("LogMode")
+  if not log:isEnabled() then
+    return
+  end
+  SetTimer("LogMode", 3 * ONE_HOUR, function()
+    UpdateProperty("Log Mode", "Off", true)
+  end)
 end
 
 function OPC.Email()
+  if not gInitialized then
+    return
+  end
   login()
 end
 
 function OPC.Password()
+  if not gInitialized then
+    return
+  end
   login()
 end
 
@@ -454,7 +565,11 @@ writeThermostat = function(serial, settings)
       writeThermostat(serial, queued)
       return
     end
-    if next(gWriteInFlight) == nil then
+    -- Not while a login is armed or in flight: resuming the poll here would
+    -- hand authenticate() the held connection back, which is exactly what
+    -- login()'s grace period is trying to keep clear. The login's own success
+    -- handler restarts the stream.
+    if next(gWriteInFlight) == nil and not gLoginPending then
       restartNotifications()
     end
   end
@@ -472,7 +587,7 @@ writeThermostat = function(serial, settings)
       handoff(serial)
       local elapsed = os.time() - t0
       if elapsed >= SLOW_WRITE_S then
-        log:warn("write to %s took %ds (long-poll connection contention)", serial, elapsed)
+        log:warn("Write to %s took %ds (long-poll connection contention)", serial, elapsed)
       end
       done()
     end, function(err)
@@ -484,9 +599,9 @@ end
 
 --- A companion pushes mutated settings for us to write to Schluter.
 --- @param idBinding integer
---- @param strCommand string
+--- @param _strCommand string
 --- @param tParams table
-function RFP.setThermostat(idBinding, strCommand, tParams)
+function RFP.setThermostat(idBinding, _strCommand, tParams)
   log:trace("RFP.setThermostat(%s)", idBinding)
   local serial = serialForBinding(idBinding)
   if not serial or not client:isAuthenticated() then
@@ -513,10 +628,18 @@ function EC.Refresh_Thermostats()
   refreshThermostats()
 end
 
+--- Drop the current session and log in again. Unlike Reset Driver, this leaves
+--- the dynamic companion bindings (and cached devices) untouched.
+function EC.Reconnect()
+  log:trace("EC.Reconnect()")
+  client:logout()
+  login()
+end
+
 function EC.Reset_Driver(tParams)
   log:trace("EC.Reset_Driver()")
   if (tParams or {})["Are You Sure?"] == "Yes" then
-    bindings:deleteAllBindings(NS)
+    bindings:reset()
     gState.devices = {}
     client:logout()
     C4:UpdateProperty("Login Status", "")
@@ -527,6 +650,6 @@ end
 --#ifndef DRIVERCENTRAL
 function EC.Update_Drivers()
   log:trace("EC.Update_Drivers()")
-  updateDrivers(true)
+  UpdateDrivers(true)
 end
 --#endif
