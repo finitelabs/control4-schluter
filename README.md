@@ -75,7 +75,7 @@ only place credentials are entered and the only cloud connection that is opened.
 
 ## Schluter Thermostat
 
-The companion driver — add one per physical thermostat and bind it to a
+The companion driver. Add one per physical thermostat and bind it to a
 thermostat connection on the account driver. Each one appears in Control4 as a
 native thermostat with setpoint, mode, and schedule control.
 
@@ -84,7 +84,7 @@ native thermostat with setpoint, mode, and schedule control.
 - Setpoint, Heat/Off mode, and hold control
 - Full weekly schedule read and edit through the native Control4 thermostat
   scheduling UI
-- Temperature values communicated in Celsius — the Control4 proxy handles
+- Temperature values communicated in Celsius, with the Control4 proxy handling
   display conversion to the project's configured scale
 
 # <span style="color:#f78d1f">Compatibility</span>
@@ -223,7 +223,7 @@ the account (binding class `SCHLUTER_THERMOSTAT`), named after the thermostat's
 room. Bind each to a **Schluter Thermostat** companion driver; that companion
 exposes the standard Control4 thermostat proxy for programming (setpoint, mode,
 schedule, temperature). This account driver has no directly programmable
-variables of its own — all thermostat control and feedback is on the companion.
+variables of its own. All thermostat control and feedback is on the companion.
 
 # <span style="color:#f78d1f">Support</span>
 

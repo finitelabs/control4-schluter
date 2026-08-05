@@ -9,7 +9,7 @@
 -- cloud host will not run a POST alongside the long-poll it holds open.
 
 --#ifdef DRIVERCENTRAL
-DC_PID = 0 -- TODO(drivercentral): Assign DriverCentral product ID
+DC_PID = 0 -- TODO: Assign DriverCentral product ID
 DC_X = nil
 DC_FILENAME = "schluter.c4z"
 --#else
@@ -316,18 +316,18 @@ local SLOW_WRITE_S = 5
 -- ─── Login ─────────────────────────────────────────────────────────────────
 
 login = function()
-  -- Stop first: retire any in-flight notification loop and the reconcile timer
-  -- before the checks below can short-circuit, so no earlier generation keeps
-  -- polling behind an "Awaiting credentials" or failed login.
-  gNotifyGeneration = gNotifyGeneration + 1
-  CancelTimer("SchluterNotify")
+  -- Stop first, before the checks below can short-circuit, so no earlier
+  -- generation keeps polling behind an "Awaiting credentials" or failed login.
+  -- suspendNotifications (not a bare generation bump) because authenticate()
+  -- POSTs, and a POST will not run alongside the held long-poll: the same
+  -- contention the write path measured. Also drop any login already armed
+  -- below, so the newest call wins.
+  suspendNotifications()
   CancelTimer("SchluterReconcile")
+  CancelTimer("SchluterLogin")
   local email = Properties["Email"]
   local password = Properties["Password"]
   if IsEmpty(email) or IsEmpty(password) then
-    if type(client.cancelNotification) == "function" then
-      client:cancelNotification()
-    end
     client:logout()
     C4:UpdateProperty("Login Status", "Enter email and password")
     C4:UpdateProperty("Driver Status", "Awaiting credentials")
@@ -335,18 +335,23 @@ login = function()
   end
   C4:UpdateProperty("Login Status", "Logging in...")
   C4:UpdateProperty("Driver Status", "Connecting")
-  client:authenticate(email, password):next(function()
-    gState.sequenceNr = 0
-    C4:UpdateProperty("Login Status", "Logged In")
-    refreshThermostats()
-    restartNotifications()
-    -- Reconcile regardless of the notification stream (see RECONCILE_INTERVAL_S).
-    SetTimer("SchluterReconcile", RECONCILE_INTERVAL_S * ONE_SECOND, refreshThermostats, true)
-  end, function(err)
-    client:logout()
-    C4:UpdateProperty("Login Status", err.message or "Login failed")
-    C4:UpdateProperty("Driver Status", "Not connected")
-    log:warn("Login failed: %s", err.message)
+  -- Same grace period the write path uses: aborting the long-poll does not
+  -- necessarily release its connection inline. Status is already updated, so
+  -- the UI does not wait on this.
+  SetTimer("SchluterLogin", WRITE_DELAY_MS, function()
+    client:authenticate(email, password):next(function()
+      gState.sequenceNr = 0
+      C4:UpdateProperty("Login Status", "Logged In")
+      refreshThermostats()
+      restartNotifications()
+      -- Reconcile regardless of the notification stream (see RECONCILE_INTERVAL_S).
+      SetTimer("SchluterReconcile", RECONCILE_INTERVAL_S * ONE_SECOND, refreshThermostats, true)
+    end, function(err)
+      client:logout()
+      C4:UpdateProperty("Login Status", err.message or "Login failed")
+      C4:UpdateProperty("Driver Status", "Not connected")
+      log:warn("Login failed: %s", err.message)
+    end)
   end)
 end
 
@@ -423,6 +428,7 @@ function OnDriverDestroyed()
   gNotifyGeneration = gNotifyGeneration + 1
   CancelTimer("SchluterNotify")
   CancelTimer("SchluterReconcile")
+  CancelTimer("SchluterLogin")
   CancelTimer("UpdateCheck")
   if type(client.cancelNotification) == "function" then
     client:cancelNotification()
