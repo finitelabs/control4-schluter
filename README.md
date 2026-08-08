@@ -118,7 +118,7 @@ is an outline of the basic steps for your convenience.
 
 1. Use the "Search" tab to find the "Schluter" driver and add it to your
    project.
-   <br><img alt="Search Drivers" src="./images/search-drivers.png" width="300"/>
+   <br><img alt="Search Drivers" src="./images/search-drivers.png" width="250"/>
 
 1. Configure the [Account Settings](#account-settings) with your Schluter email
    and password.
