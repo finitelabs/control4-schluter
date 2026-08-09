@@ -562,8 +562,17 @@ writeThermostat = function(serial, settings)
     local queued = gQueuedWrite[serial]
     if queued then
       gQueuedWrite[serial] = nil
-      writeThermostat(serial, queued)
-      return
+      -- Re-check the session. RFP.setThermostat gated on it before the POST
+      -- this is completing, and a write held open is exactly the window where
+      -- the session gets rejected, so the replay must not inherit that stale
+      -- decision. Dropping the settings is safe: every push carries the full
+      -- object, so the companion re-sends on its next retry once login() has
+      -- re-established the session.
+      if client:isAuthenticated() then
+        writeThermostat(serial, queued)
+        return
+      end
+      log:warn("Dropped a queued write for %s: session was lost while a write was in flight", serial)
     end
     -- Not while a login is armed or in flight: resuming the poll here would
     -- hand authenticate() the held connection back, which is exactly what
