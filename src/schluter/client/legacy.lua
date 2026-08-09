@@ -231,6 +231,13 @@ function Client:setThermostat(serialNumber, settings)
       d:resolve(settings)
     end
   end, function(errorResponse)
+    -- Mirrors _getJson: a write is the other place a rejected session surfaces,
+    -- and suspendNotifications() has just cancelled the long poll, so without
+    -- this the 401 goes unnoticed until some unrelated GET happens to hit it.
+    if type(errorResponse) == "table" and errorResponse.code == 401 then
+      log:info("Session rejected (401) on write; clearing it so the driver re-authenticates")
+      self:logout()
+    end
     local detail = type(errorResponse) == "table" and errorResponse.error or errorResponse
     d:reject("setThermostat request failed: " .. tostring(detail))
   end)
