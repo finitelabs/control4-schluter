@@ -24,7 +24,6 @@ require("lib.utils")
 require("drivers-common-public.global.handlers")
 require("drivers-common-public.global.lib")
 require("drivers-common-public.global.timer")
-require("drivers-common-public.global.url")
 
 JSON = require("JSON")
 
@@ -435,7 +434,6 @@ function OnDriverLateInit()
   if not CheckMinimumVersion("Driver Status") then
     return
   end
-  C4:FileSetDir("c29tZXNwZWNpYWxrZXk=++11")
 
   for p, _ in pairs(Properties) do
     local ok, err = pcall(OnPropertyChanged, p)
