@@ -165,6 +165,20 @@ local function ingestThermostat(device)
   handoff(serial)
 end
 
+--- The connected status line for a given thermostat count.
+local function connectedStatus(count)
+  return string.format("Connected (%d thermostat%s)", count, count == 1 and "" or "s")
+end
+
+--- How many thermostats we currently hold.
+local function thermostatCount()
+  local count = 0
+  for _ in pairs(gState.devices) do
+    count = count + 1
+  end
+  return count
+end
+
 --- Fetch the full thermostat list for the account and ingest each. Responses are
 --- accepted in issue order only: with several refreshes in flight (a notification
 --- and the safety-net poll can overlap) a slow earlier response would otherwise
@@ -187,10 +201,19 @@ local function refreshThermostats()
     for _, device in ipairs(list) do
       ingestThermostat(device)
     end
-    C4:UpdateProperty("Driver Status", string.format("Connected (%d thermostat%s)", #list, #list == 1 and "" or "s"))
+    C4:UpdateProperty("Driver Status", connectedStatus(#list))
   end, function(err)
     log:warn("refreshThermostats failed: %s", err)
-    C4:UpdateProperty("Driver Status", "Error retrieving thermostats")
+    -- The notification long-poll keeps known thermostats current and drives this
+    -- list read even for heartbeats that carry no device, so a transient failure
+    -- here (e.g. an API timeout) must not mask a healthy connection. Keep
+    -- reporting the thermostats we hold; only surface the error before discovery.
+    local count = thermostatCount()
+    if count == 0 then
+      C4:UpdateProperty("Driver Status", "Error retrieving thermostats")
+    else
+      C4:UpdateProperty("Driver Status", connectedStatus(count))
+    end
   end)
 end
 
