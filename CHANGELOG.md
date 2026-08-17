@@ -18,11 +18,16 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 - Removed
 -->
 
-<!-- #ifndef DRIVERCENTRAL -->
-
 ## Unreleased
 
 ### Fixed
+
+- Fixed the driver reporting "Error retrieving thermostats" when a periodic
+  account refresh timed out, even though the thermostat was still connected and
+  reporting live. It now keeps the connected status as long as a thermostat is
+  known, and only shows the error before any have been discovered.
+
+<!-- #ifndef DRIVERCENTRAL -->
 
 - Fixed an automatic update sometimes leaving companion drivers on the previous
   version until the next update, which could make them stop responding in the
