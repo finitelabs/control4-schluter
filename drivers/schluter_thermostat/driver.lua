@@ -67,32 +67,6 @@ local function isCelsius()
   return gReportedScale == "C"
 end
 
--- ─── Command param parsing ─────────────────────────────────────────────────
-
---- Extract a Celsius value from a proxy setpoint command's params.
---- @param tParams table
---- @return number|nil celsius
-local function getCelsiusFromParams(tParams)
-  tParams = tParams or {}
-  local celsius = tonumber(tParams.CELSIUS)
-  if celsius ~= nil then
-    return celsius
-  end
-  local fahrenheit = tonumber(tParams.FAHRENHEIT)
-  if fahrenheit ~= nil then
-    return Thermostat.fToC(fahrenheit)
-  end
-  local value = tonumber(tParams.VALUE)
-  if value ~= nil then
-    local scale = tParams.SCALE or "F"
-    if scale == "C" or scale == "c" or scale == "CELSIUS" then
-      return value
-    end
-    return Thermostat.fToC(value)
-  end
-  return nil
-end
-
 -- ─── Push state / capabilities to the thermostat proxy ─────────────────────
 
 --- Advertise the capabilities of the handed device (heat-only single setpoint,
@@ -322,7 +296,9 @@ end
 --- @param idBinding integer
 --- @param tParams table
 local function handleSetpoint(idBinding, tParams)
-  local celsius = getCelsiusFromParams(tParams)
+  -- The proxy sends setpoints in Fahrenheit when SCALE is absent, unlike a
+  -- sensor binding, which reports Celsius.
+  local celsius = CelsiusFromParams(tParams, "F")
   if celsius == nil then
     return
   end

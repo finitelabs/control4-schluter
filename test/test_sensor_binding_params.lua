@@ -132,4 +132,41 @@ T.eq("still scaled C", temperatureChanged.params.SCALE, "C")
 T.check("HEAT_SETPOINT_CHANGED still goes to the proxy", setpointChanged ~= nil, "missing")
 T.eq("still the reported setpoint", setpointChanged.params.SETPOINT, "22")
 
+--------------------------------------------------------------------------------
+T.section("a setpoint command is read through the shared tolerant parse")
+--------------------------------------------------------------------------------
+
+-- The driver's local parser was folded onto CelsiusFromParams. It is read back
+-- through the setpoint the driver actually adopts, rather than by calling the
+-- parser: the setpoint is what a wrong conversion would damage, and it is the
+-- only observable a local function has.
+--
+-- applySetpoint snaps to the nearest 0.5 °C (Schluter's resolution), so the
+-- shared helper rounding a conversion to 1 decimal where the local one did not
+-- is absorbed before it reaches the device.
+local function adoptedSetpoint(tParams)
+  handOver()
+  sends = {}
+  RFP.SET_SETPOINT_HEAT(PROXY_BINDING, "SET_SETPOINT_HEAT", tParams)
+  local send = findSend(sends, PROXY_BINDING, "HEAT_SETPOINT_CHANGED")
+  return send and send.params.SETPOINT or nil
+end
+
+T.eq("CELSIUS is taken directly", adoptedSetpoint({ CELSIUS = "23.5" }), "23.5")
+T.eq("FAHRENHEIT is converted", adoptedSetpoint({ FAHRENHEIT = "72" }), "22")
+T.eq("a bare VALUE is Fahrenheit, as the proxy sends it", adoptedSetpoint({ VALUE = "72" }), "22")
+T.eq("VALUE with SCALE=C is Celsius", adoptedSetpoint({ VALUE = "23.5", SCALE = "C" }), "23.5")
+T.eq("CELSIUS wins over FAHRENHEIT", adoptedSetpoint({ CELSIUS = "23.5", FAHRENHEIT = "100" }), "23.5")
+T.eq("nothing usable is ignored", adoptedSetpoint({ MODE = "Heat" }), nil)
+
+-- The local parser fell through to Fahrenheit for any scale it did not spell
+-- out, so a Kelvin setpoint became (K - 32) * 5/9: 296.65 K is 23.5 °C and was
+-- adopted as 147 °C. The shared helper knows the scale.
+T.eq("KELVIN is converted, not read as Fahrenheit", adoptedSetpoint({ VALUE = "296.65", SCALE = "KELVIN" }), "23.5")
+
+-- A scale that names no temperature now yields nil rather than being assumed
+-- Fahrenheit, so an unreadable command is dropped instead of moving the floor
+-- heating to an invented setpoint.
+T.eq("an unrecognized scale is dropped", adoptedSetpoint({ VALUE = "72", SCALE = "BANANAS" }), nil)
+
 T.finish()
