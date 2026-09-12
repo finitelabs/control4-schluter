@@ -154,7 +154,6 @@ end
 
 T.eq("CELSIUS is taken directly", adoptedSetpoint({ CELSIUS = "23.5" }), "23.5")
 T.eq("FAHRENHEIT is converted", adoptedSetpoint({ FAHRENHEIT = "72" }), "22")
-T.eq("a bare VALUE is Fahrenheit, as the proxy sends it", adoptedSetpoint({ VALUE = "72" }), "22")
 T.eq("VALUE with SCALE=C is Celsius", adoptedSetpoint({ VALUE = "23.5", SCALE = "C" }), "23.5")
 T.eq("CELSIUS wins over FAHRENHEIT", adoptedSetpoint({ CELSIUS = "23.5", FAHRENHEIT = "100" }), "23.5")
 T.eq("nothing usable is ignored", adoptedSetpoint({ MODE = "Heat" }), nil)
@@ -168,6 +167,11 @@ T.eq("KELVIN is converted, not read as Fahrenheit", adoptedSetpoint({ VALUE = "2
 -- Fahrenheit, so an unreadable command is dropped instead of moving the floor
 -- heating to an invented setpoint.
 T.eq("an unrecognized scale is dropped", adoptedSetpoint({ VALUE = "72", SCALE = "BANANAS" }), nil)
+
+-- Same rule for a VALUE that states no scale at all: the call site passes no
+-- default, so there is nothing to fall back to. A default of Fahrenheit would
+-- have adopted this payload as 22 C on a scale the sender never named.
+T.eq("a bare VALUE is dropped rather than assumed Fahrenheit", adoptedSetpoint({ VALUE = "72" }), nil)
 
 --------------------------------------------------------------------------------
 T.section("the setpoint handlers are spelled the way the proxy dispatches them")

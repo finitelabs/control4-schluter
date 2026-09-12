@@ -297,8 +297,10 @@ end
 --- @param tParams table
 local function handleSetpoint(idBinding, tParams)
   -- A proxy setpoint carries CELSIUS, FAHRENHEIT and KELVIN at once, so the
-  -- parse returns on CELSIUS and the default scale is never read.
-  local celsius = CelsiusFromParams(tParams, "F")
+  -- parse returns on CELSIUS. No default scale is passed: a VALUE that names no
+  -- scale is then dropped rather than guessed, and a guessed setpoint drives the
+  -- heating.
+  local celsius = CelsiusFromParams(tParams)
   if celsius == nil then
     return
   end
