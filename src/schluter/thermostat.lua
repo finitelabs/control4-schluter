@@ -187,6 +187,24 @@ function M.holdMode(state)
   return "Off"
 end
 
+--- Nudge the heat setpoint by one resolution step in the given display scale
+--- (0.5 °C / 1 °F, matching driver.xml), clamped to the device's bounds. Under
+--- Fahrenheit the step is taken on the rounded °F value, so repeated presses
+--- walk whole degrees instead of drifting on the °C round trip.
+--- @param state SchluterState
+--- @param delta integer +1 or -1
+--- @param scale string "C" or "F"
+--- @return number celsius
+function M.stepSetpointC(state, delta, scale)
+  local celsius
+  if scale == "C" then
+    celsius = state.setpointC + delta * 0.5
+  else
+    celsius = M.fToC(M.round(M.cToF(state.setpointC)) + delta)
+  end
+  return math.max(state.minC, math.min(state.maxC, celsius))
+end
+
 -- ─── Settings builders (Control4 → Schluter POST body) ───────────────────────
 
 --- The device's current regulation mode. Schluter uses `RegulationMode`; NuHeat
