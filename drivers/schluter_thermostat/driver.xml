@@ -120,7 +120,7 @@
     <setpoint_single_resolution_c>0.5</setpoint_single_resolution_c>
     <setpoint_single_resolution_f>1</setpoint_single_resolution_f>
     <can_inc_dec_setpoints>True</can_inc_dec_setpoints>
-    <can_change_scale>False</can_change_scale>
+    <can_change_scale>True</can_change_scale>
     <has_extras>False</has_extras>
     <has_vacation_mode>False</has_vacation_mode>
     <has_remote_sensor>False</has_remote_sensor>

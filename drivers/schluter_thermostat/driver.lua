@@ -26,6 +26,7 @@ JSON = require("JSON")
 
 local log = require("lib.logging")
 local Thermostat = require("schluter.thermostat")
+local displayScale = require("schluter.display_scale")
 local constants = require("constants")
 
 --- thermostatV2 proxy (this driver's primary proxy).
@@ -43,10 +44,11 @@ local gInitialized = false
 local gDevice = nil
 --- Normalized state derived from gDevice (see schluter.thermostat).
 local gState = nil
---- The project's display scale ("C"/"F"), reported by the proxy's SET_SCALE.
---- Schedule setpoints are pushed as integer values in this scale (like the
---- NuHeat Signature driver), matching the editor's grid so they don't drift.
-local gScale = "F"
+--- The display scale ("C"/"F") we last reported to the proxy, resolved from
+--- Director in OnDriverLateInit and re-resolved whenever it changes. Schedule
+--- setpoints are pushed as integer values in this scale (like the NuHeat
+--- Signature driver), matching the editor's grid so they don't drift.
+local gReportedScale = nil
 
 --- Pending optimistic write. Schluter's cloud is slow to reflect changes —
 --- especially *leaving* a hold (seconds to tens of seconds) — and occasionally
@@ -62,7 +64,7 @@ local RETRY_INTERVAL_S = 12
 
 --- @return boolean
 local function isCelsius()
-  return tostring(gScale):sub(1, 1):upper() == "C"
+  return gReportedScale == "C"
 end
 
 -- ─── Command param parsing ─────────────────────────────────────────────────
@@ -236,6 +238,23 @@ local function pushSchedule()
   end
 end
 
+--- Adopt a display scale. The proxy defaults to Fahrenheit and never consults
+--- the project setting, so it has to be told; the schedule is re-pushed because
+--- its setpoints are rendered in this scale. SCALE_CHANGED rewrites the proxy
+--- variable the watcher listens on, so the unchanged-scale return is what keeps
+--- a report from feeding itself back in a loop.
+--- @param scale string "C" or "F"
+local function applyDisplayScale(scale)
+  if scale == gReportedScale then
+    return
+  end
+  gReportedScale = scale
+  log:debug("Setting thermostat display scale to %s", scale)
+  SendToProxy(PROXY_BINDING, "SCALE_CHANGED", { SCALE = scale }, "NOTIFY")
+  gScheduleJson = nil
+  pushSchedule()
+end
+
 --- Parse an UPDATE_SCHEDULE_ENTRIES command into edit rows. The thermostatV2
 --- proxy sends an ENTRIES XML blob of <ScheduleEntryUpdate .../> elements (and,
 --- on some versions, flat params). Setpoints arrive in Control4's canonical unit
@@ -333,13 +352,7 @@ local function adjustSetpoint(idBinding, delta)
   if not gState then
     return
   end
-  local celsius
-  if isCelsius() then
-    celsius = gState.setpointC + delta * 0.5
-  else
-    celsius = Thermostat.fToC(Thermostat.round(Thermostat.cToF(gState.setpointC)) + delta)
-  end
-  celsius = math.max(gState.minC, math.min(gState.maxC, celsius))
+  local celsius = Thermostat.stepSetpointC(gState, delta, gReportedScale)
   applyAndSend(idBinding, function()
     Thermostat.applySetpoint(gDevice, celsius, nextComfortEndTime())
   end)
@@ -376,19 +389,20 @@ function RFP.SET_MODE_HOLD(idBinding, _strCommand, tParams)
   end)
 end
 
---- The proxy reports the project's display scale ("C"/"F"). Track it and re-push
---- the schedule so its setpoints are in that scale (matching the editor grid).
+--- The Navigator-initiated scale change. Director also writes the proxy's SCALE
+--- variable, which the watcher picks up, but this command carries the chosen
+--- scale directly and may arrive before the variable is written.
 function RFP.SET_SCALE(idBinding, _strCommand, tParams)
   if idBinding ~= PROXY_BINDING then
     return
   end
-  local scale = (tParams or {}).SCALE
-  if not IsEmpty(scale) then
-    gScale = scale
+  local scale = TemperatureScaleLetter((tParams or {}).SCALE)
+  if scale == nil then
+    log:warn("Ignoring SET_SCALE with unrecognized scale: %s", tostring((tParams or {}).SCALE))
+    return
   end
-  log:trace("RFP.SET_SCALE(%s)", tostring(gScale))
-  gScheduleJson = nil
-  pushSchedule()
+  log:trace("RFP.SET_SCALE(%s)", scale)
+  applyDisplayScale(scale)
 end
 
 --- Edit one or more schedule entries. Applies each to the device (propagating
@@ -529,6 +543,12 @@ function OnDriverLateInit()
     end
   end
   gInitialized = true
+  applyDisplayScale(displayScale.resolve(PROXY_BINDING))
+  -- A Navigator scale change reaches the proxy's variable even when SET_SCALE
+  -- does not reach the driver.
+  displayScale.watch(PROXY_BINDING, function()
+    applyDisplayScale(displayScale.resolve(PROXY_BINDING))
+  end)
   -- Settle Driver Status now that init is done; the replay above left it at
   -- "Initializing" via the OPC.Driver_Status guard.
   C4:UpdateProperty("Driver Status", "Waiting for thermostat")

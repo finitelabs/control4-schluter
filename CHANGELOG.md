@@ -27,6 +27,16 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
   reporting live. It now keeps the connected status as long as a thermostat is
   known, and only shows the error before any have been discovered.
 
+- Fixed the thermostat always using Fahrenheit. It never read the temperature
+  scale from Control4, so a Celsius project got Fahrenheit setpoint steps and a
+  schedule shown in the wrong unit. The driver now follows the scale the
+  thermostat is set to, falling back to the project's setting, and picks up a
+  change made in Navigator straight away.
+
+- Fixed the thermostat telling Control4 its scale could not be changed while
+  still acting on the change, so the Celsius and Fahrenheit choice is now
+  offered.
+
 <!-- #ifndef DRIVERCENTRAL -->
 
 - Fixed an automatic update sometimes leaving companion drivers on the previous
