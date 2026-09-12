@@ -67,32 +67,6 @@ local function isCelsius()
   return gReportedScale == "C"
 end
 
--- ─── Command param parsing ─────────────────────────────────────────────────
-
---- Extract a Celsius value from a proxy setpoint command's params.
---- @param tParams table
---- @return number|nil celsius
-local function getCelsiusFromParams(tParams)
-  tParams = tParams or {}
-  local celsius = tonumber(tParams.CELSIUS)
-  if celsius ~= nil then
-    return celsius
-  end
-  local fahrenheit = tonumber(tParams.FAHRENHEIT)
-  if fahrenheit ~= nil then
-    return Thermostat.fToC(fahrenheit)
-  end
-  local value = tonumber(tParams.VALUE)
-  if value ~= nil then
-    local scale = tParams.SCALE or "F"
-    if scale == "C" or scale == "c" or scale == "CELSIUS" then
-      return value
-    end
-    return Thermostat.fToC(value)
-  end
-  return nil
-end
-
 -- ─── Push state / capabilities to the thermostat proxy ─────────────────────
 
 --- Advertise the capabilities of the handed device (heat-only single setpoint,
@@ -142,10 +116,7 @@ local function pushState()
   SendToProxy(PROXY_BINDING, "HVAC_MODE_CHANGED", { MODE = Thermostat.hvacMode(gState) }, "NOTIFY")
   SendToProxy(PROXY_BINDING, "HVAC_STATE_CHANGED", { STATE = Thermostat.hvacState(gState) }, "NOTIFY")
   SendToProxy(PROXY_BINDING, "HOLD_MODE_CHANGED", { MODE = Thermostat.holdMode(gState) }, "NOTIFY")
-  SendToProxy(TEMP_OUTPUT_BINDING, "VALUE_CHANGED", {
-    CELSIUS = tostring(gState.temperatureC),
-    FAHRENHEIT = tostring(Thermostat.cToF(gState.temperatureC)),
-  })
+  SendToProxy(TEMP_OUTPUT_BINDING, "VALUE_CHANGED", SensorValueParams(gState.temperatureC, "CELSIUS"))
 end
 
 --- Send the mutated Schluter settings object back to the account to write.
@@ -325,18 +296,13 @@ end
 --- @param idBinding integer
 --- @param tParams table
 local function handleSetpoint(idBinding, tParams)
-  local celsius = getCelsiusFromParams(tParams)
+  local celsius = CelsiusFromParams(tParams)
   if celsius == nil then
     return
   end
   applyAndSend(idBinding, function()
     Thermostat.applySetpoint(gDevice, celsius, nextComfortEndTime())
   end)
-end
-
-function RFP.SET_SINGLE_SETPOINT(idBinding, _strCommand, tParams)
-  log:trace("RFP.SET_SINGLE_SETPOINT(%s)", idBinding)
-  handleSetpoint(idBinding, tParams)
 end
 
 function RFP.SET_SETPOINT_HEAT(idBinding, _strCommand, tParams)
