@@ -44,11 +44,11 @@ local gInitialized = false
 local gDevice = nil
 --- Normalized state derived from gDevice (see schluter.thermostat).
 local gState = nil
---- The effective display scale ("C"/"F"), resolved from Director in
---- OnDriverLateInit and re-resolved whenever it changes. Schedule setpoints are
---- pushed as integer values in this scale (like the NuHeat Signature driver),
---- matching the editor's grid so they don't drift.
-local gScale = nil
+--- The display scale ("C"/"F") we last reported to the proxy, resolved from
+--- Director in OnDriverLateInit and re-resolved whenever it changes. Schedule
+--- setpoints are pushed as integer values in this scale (like the NuHeat
+--- Signature driver), matching the editor's grid so they don't drift.
+local gReportedScale = nil
 
 --- Pending optimistic write. Schluter's cloud is slow to reflect changes —
 --- especially *leaving* a hold (seconds to tens of seconds) — and occasionally
@@ -64,7 +64,7 @@ local RETRY_INTERVAL_S = 12
 
 --- @return boolean
 local function isCelsius()
-  return gScale == "C"
+  return gReportedScale == "C"
 end
 
 -- ─── Command param parsing ─────────────────────────────────────────────────
@@ -240,13 +240,15 @@ end
 
 --- Adopt a display scale. The proxy defaults to Fahrenheit and never consults
 --- the project setting, so it has to be told; the schedule is re-pushed because
---- its setpoints are rendered in this scale.
+--- its setpoints are rendered in this scale. SCALE_CHANGED rewrites the proxy
+--- variable the watcher listens on, so the unchanged-scale return is what keeps
+--- a report from feeding itself back in a loop.
 --- @param scale string "C" or "F"
 local function applyDisplayScale(scale)
-  if scale == gScale then
+  if scale == gReportedScale then
     return
   end
-  gScale = scale
+  gReportedScale = scale
   log:debug("Setting thermostat display scale to %s", scale)
   SendToProxy(PROXY_BINDING, "SCALE_CHANGED", { SCALE = scale }, "NOTIFY")
   gScheduleJson = nil
@@ -350,7 +352,7 @@ local function adjustSetpoint(idBinding, delta)
   if not gState then
     return
   end
-  local celsius = Thermostat.stepSetpointC(gState, delta, gScale)
+  local celsius = Thermostat.stepSetpointC(gState, delta, gReportedScale)
   applyAndSend(idBinding, function()
     Thermostat.applySetpoint(gDevice, celsius, nextComfortEndTime())
   end)

@@ -113,8 +113,8 @@ boundProxy = PROXY_ID
 
 -- ── Stepping follows the resolved scale ──────────────────────────────────────
 --
--- The bug this closes: gScale was a dead "F" literal that only SET_SCALE ever
--- reassigned, so a Celsius project stepped in Fahrenheit.
+-- The bug this closes: gReportedScale was a dead "F" literal that only
+-- SET_SCALE ever reassigned, so a Celsius project stepped in Fahrenheit.
 
 T.section("Setpoint stepping under each scale")
 
