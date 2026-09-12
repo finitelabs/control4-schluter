@@ -296,8 +296,8 @@ end
 --- @param idBinding integer
 --- @param tParams table
 local function handleSetpoint(idBinding, tParams)
-  -- The proxy sends setpoints in Fahrenheit when SCALE is absent, unlike a
-  -- sensor binding, which reports Celsius.
+  -- A proxy setpoint carries CELSIUS, FAHRENHEIT and KELVIN at once, so the
+  -- parse returns on CELSIUS and the default scale is never read.
   local celsius = CelsiusFromParams(tParams, "F")
   if celsius == nil then
     return
