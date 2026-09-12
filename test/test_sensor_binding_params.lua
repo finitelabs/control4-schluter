@@ -169,4 +169,23 @@ T.eq("KELVIN is converted, not read as Fahrenheit", adoptedSetpoint({ VALUE = "2
 -- heating to an invented setpoint.
 T.eq("an unrecognized scale is dropped", adoptedSetpoint({ VALUE = "72", SCALE = "BANANAS" }), nil)
 
+--------------------------------------------------------------------------------
+T.section("the setpoint handlers are spelled the way the proxy dispatches them")
+--------------------------------------------------------------------------------
+
+-- ReceivedFromProxy resolves a handler by exact command name and accepts it only
+-- if it is a function (handlers.lua:866-868, Select(RFP, strCommand)); this
+-- driver defines no numeric idBinding fallback, so a misspelled handler is never
+-- reached and the miss is logged only behind DEBUGPRINT. SET_SINGLE_SETPOINT was
+-- one: the thermostatV2 command is SET_SETPOINT_SINGLE, and this driver does not
+-- advertise that model anyway (hasSingleSetpoint false, driver.xml
+-- has_single_setpoint False), so the correctly spelled handler would be dead too.
+--
+-- The present-checks are not decoration: they are what stops the absent-check
+-- from passing vacuously against an RFP that was never populated.
+T.eq("SET_SINGLE_SETPOINT is not dispatchable", type(RFP.SET_SINGLE_SETPOINT), "nil")
+T.eq("SET_SETPOINT_HEAT is dispatchable", type(RFP.SET_SETPOINT_HEAT), "function")
+T.eq("INC_SETPOINT_HEAT is dispatchable", type(RFP.INC_SETPOINT_HEAT), "function")
+T.eq("DEC_SETPOINT_HEAT is dispatchable", type(RFP.DEC_SETPOINT_HEAT), "function")
+
 T.finish()

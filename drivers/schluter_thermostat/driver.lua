@@ -307,11 +307,6 @@ local function handleSetpoint(idBinding, tParams)
   end)
 end
 
-function RFP.SET_SINGLE_SETPOINT(idBinding, _strCommand, tParams)
-  log:trace("RFP.SET_SINGLE_SETPOINT(%s)", idBinding)
-  handleSetpoint(idBinding, tParams)
-end
-
 function RFP.SET_SETPOINT_HEAT(idBinding, _strCommand, tParams)
   log:trace("RFP.SET_SETPOINT_HEAT(%s)", idBinding)
   handleSetpoint(idBinding, tParams)
