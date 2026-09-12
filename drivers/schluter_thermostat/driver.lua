@@ -142,10 +142,7 @@ local function pushState()
   SendToProxy(PROXY_BINDING, "HVAC_MODE_CHANGED", { MODE = Thermostat.hvacMode(gState) }, "NOTIFY")
   SendToProxy(PROXY_BINDING, "HVAC_STATE_CHANGED", { STATE = Thermostat.hvacState(gState) }, "NOTIFY")
   SendToProxy(PROXY_BINDING, "HOLD_MODE_CHANGED", { MODE = Thermostat.holdMode(gState) }, "NOTIFY")
-  SendToProxy(TEMP_OUTPUT_BINDING, "VALUE_CHANGED", {
-    CELSIUS = tostring(gState.temperatureC),
-    FAHRENHEIT = tostring(Thermostat.cToF(gState.temperatureC)),
-  })
+  SendToProxy(TEMP_OUTPUT_BINDING, "VALUE_CHANGED", SensorValueParams(gState.temperatureC, "CELSIUS"))
 end
 
 --- Send the mutated Schluter settings object back to the account to write.
