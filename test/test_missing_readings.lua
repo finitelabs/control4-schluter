@@ -337,8 +337,7 @@ T.contains("and carries the edited temperature", written and written.params.JSON
 T.section("a setpoint command that is not a finite number is dropped")
 --------------------------------------------------------------------------------
 
--- CelsiusFromParams parses with tonumber_expect_period, which yields infinity
--- for "1e999". An infinite setpoint reaches the device as a JSON null.
+-- An infinite setpoint would reach the device as a JSON null.
 local function adoptedSetpoint(tParams)
   handOver()
   sends = {}

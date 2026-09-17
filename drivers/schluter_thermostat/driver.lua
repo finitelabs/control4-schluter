@@ -311,8 +311,7 @@ end
 --- @param idBinding integer
 --- @param tParams table
 local function handleSetpoint(idBinding, tParams)
-  -- CelsiusFromParams yields infinity, not nil, for an overflowing literal.
-  local celsius = tofinite(CelsiusFromParams(tParams))
+  local celsius = CelsiusFromParams(tParams)
   if celsius == nil then
     return
   end
