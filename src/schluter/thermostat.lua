@@ -6,6 +6,8 @@
 --- the `settings` object POSTed back to myschluter.com. Used by the companion
 --- (schluter_thermostat) driver. See docs/schluter-api-reference.md.
 
+require("lib.utils") -- tofinite
+
 local M = {}
 
 --- Schluter wire temperatures are Celsius × 100 (hundredths of a degree C).
@@ -23,23 +25,10 @@ M.SETPOINT_EPSILON_C = 0.28
 
 -- ─── Temperature conversion ────────────────────────────────────────────────
 
---- Every numeric field here comes from a cloud JSON body or from the proxy, so
---- it can be absent, JSON-null or non-numeric. `tonumber` also turns "1e999"
---- into infinity, which survives every `== nil` test downstream.
---- @param value any
---- @return number|nil
-local function finite(value)
-  local n = tonumber(value)
-  if n == nil or n ~= n or n == math.huge or n == -math.huge then
-    return nil
-  end
-  return n
-end
-
 --- @param n number Schluter wire value (°C × 100)
 --- @return number|nil celsius
 function M.schluterToC(n)
-  local v = finite(n)
+  local v = tofinite(n)
   if v == nil then
     return nil
   end
@@ -55,7 +44,7 @@ end
 --- @param c number Celsius
 --- @return number|nil fahrenheit
 function M.cToF(c)
-  local v = finite(c)
+  local v = tofinite(c)
   if v == nil then
     return nil
   end
@@ -65,7 +54,7 @@ end
 --- @param f number Fahrenheit
 --- @return number|nil celsius
 function M.fToC(f)
-  local v = finite(f)
+  local v = tofinite(f)
   if v == nil then
     return nil
   end
@@ -80,7 +69,7 @@ M.KELVIN_OFFSET = 273.15
 --- @param value number
 --- @return number|nil celsius
 function M.c4ToC(value)
-  local n = finite(value)
+  local n = tofinite(value)
   if n == nil then
     return nil
   end
@@ -107,7 +96,7 @@ end
 --- @param temp number
 --- @return number|nil
 function M.normalize(temp)
-  local t = finite(temp)
+  local t = tofinite(temp)
   if t == nil then
     return nil
   end
@@ -220,7 +209,7 @@ end
 --- @param scale string "C" or "F"
 --- @return number|nil celsius Nil when the device has reported no setpoint to step from.
 function M.stepSetpointC(state, delta, scale)
-  local current = finite(state.setpointC)
+  local current = tofinite(state.setpointC)
   if current == nil then
     return nil
   end

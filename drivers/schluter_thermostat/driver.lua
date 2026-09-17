@@ -105,11 +105,7 @@ local function pushState()
   end
   C4:UpdateProperty("Driver Status", gState.online and "Online" or "Offline")
   SendToProxy(PROXY_BINDING, "ONLINE_CHANGED", { STATE = gState.online }, "NOTIFY")
-  -- A handoff can carry no Temperature/SetPointTemp at all: the cloud answers
-  -- some POSTs with just {Success, SerialNumber}, and an oauth handoff maps
-  -- field names that are not yet verified. tostring() would push the literal
-  -- string "nil" to the proxy, so the reading is withheld instead and the proxy
-  -- keeps the last one it was given.
+  -- Withheld rather than pushed as "nil", so the proxy keeps the last reading.
   if gState.temperatureC ~= nil then
     SendToProxy(PROXY_BINDING, "TEMPERATURE_CHANGED", {
       TEMPERATURE = tostring(gState.temperatureC),
@@ -183,8 +179,6 @@ local COOL_PLACEHOLDER_C = 35
 --- "C" — so it lands on the editor's grid without drifting.
 --- @param row table { c4Day, entryIndex, minutes, active, tempC }
 local function pushScheduleEntry(row)
-  -- One unreadable TempFloor used to abort the whole push, so no entry reached
-  -- the proxy and the editor showed an empty week.
   if row.tempC == nil then
     log:warn("Skipping schedule day %s entry %s: the device reported no setpoint", row.c4Day, row.entryIndex)
     return
@@ -317,8 +311,7 @@ end
 --- @param idBinding integer
 --- @param tParams table
 local function handleSetpoint(idBinding, tParams)
-  -- CelsiusFromParams parses with tonumber_expect_period, which yields infinity
-  -- for "1e999" rather than nil.
+  -- CelsiusFromParams yields infinity, not nil, for an overflowing literal.
   local celsius = tofinite(CelsiusFromParams(tParams))
   if celsius == nil then
     return
