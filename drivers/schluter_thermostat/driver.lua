@@ -105,18 +105,33 @@ local function pushState()
   end
   C4:UpdateProperty("Driver Status", gState.online and "Online" or "Offline")
   SendToProxy(PROXY_BINDING, "ONLINE_CHANGED", { STATE = gState.online }, "NOTIFY")
-  SendToProxy(PROXY_BINDING, "TEMPERATURE_CHANGED", {
-    TEMPERATURE = tostring(gState.temperatureC),
-    SCALE = "C",
-  }, "NOTIFY")
-  SendToProxy(PROXY_BINDING, "HEAT_SETPOINT_CHANGED", {
-    SETPOINT = tostring(gState.setpointC),
-    SCALE = "C",
-  }, "NOTIFY")
+  -- A handoff can carry no Temperature/SetPointTemp at all: the cloud answers
+  -- some POSTs with just {Success, SerialNumber}, and an oauth handoff maps
+  -- field names that are not yet verified. tostring() would push the literal
+  -- string "nil" to the proxy, so the reading is withheld instead and the proxy
+  -- keeps the last one it was given.
+  if gState.temperatureC ~= nil then
+    SendToProxy(PROXY_BINDING, "TEMPERATURE_CHANGED", {
+      TEMPERATURE = tostring(gState.temperatureC),
+      SCALE = "C",
+    }, "NOTIFY")
+  else
+    log:warn("Handoff carried no usable temperature; keeping the last one reported")
+  end
+  if gState.setpointC ~= nil then
+    SendToProxy(PROXY_BINDING, "HEAT_SETPOINT_CHANGED", {
+      SETPOINT = tostring(gState.setpointC),
+      SCALE = "C",
+    }, "NOTIFY")
+  else
+    log:warn("Handoff carried no usable setpoint; keeping the last one reported")
+  end
   SendToProxy(PROXY_BINDING, "HVAC_MODE_CHANGED", { MODE = Thermostat.hvacMode(gState) }, "NOTIFY")
   SendToProxy(PROXY_BINDING, "HVAC_STATE_CHANGED", { STATE = Thermostat.hvacState(gState) }, "NOTIFY")
   SendToProxy(PROXY_BINDING, "HOLD_MODE_CHANGED", { MODE = Thermostat.holdMode(gState) }, "NOTIFY")
-  SendToProxy(TEMP_OUTPUT_BINDING, "VALUE_CHANGED", SensorValueParams(gState.temperatureC, "CELSIUS"))
+  if gState.temperatureC ~= nil then
+    SendToProxy(TEMP_OUTPUT_BINDING, "VALUE_CHANGED", SensorValueParams(gState.temperatureC, "CELSIUS"))
+  end
 end
 
 --- Send the mutated Schluter settings object back to the account to write.
@@ -168,6 +183,12 @@ local COOL_PLACEHOLDER_C = 35
 --- "C" — so it lands on the editor's grid without drifting.
 --- @param row table { c4Day, entryIndex, minutes, active, tempC }
 local function pushScheduleEntry(row)
+  -- One unreadable TempFloor used to abort the whole push, so no entry reached
+  -- the proxy and the editor showed an empty week.
+  if row.tempC == nil then
+    log:warn("Skipping schedule day %s entry %s: the device reported no setpoint", row.c4Day, row.entryIndex)
+    return
+  end
   local heat, cool, units
   if isCelsius() then
     heat = Thermostat.round(Thermostat.normalize(row.tempC))
@@ -296,7 +317,9 @@ end
 --- @param idBinding integer
 --- @param tParams table
 local function handleSetpoint(idBinding, tParams)
-  local celsius = CelsiusFromParams(tParams)
+  -- CelsiusFromParams parses with tonumber_expect_period, which yields infinity
+  -- for "1e999" rather than nil.
+  local celsius = tofinite(CelsiusFromParams(tParams))
   if celsius == nil then
     return
   end
@@ -319,6 +342,10 @@ local function adjustSetpoint(idBinding, delta)
     return
   end
   local celsius = Thermostat.stepSetpointC(gState, delta, gReportedScale)
+  if celsius == nil then
+    log:warn("Ignoring a setpoint step: the device has reported no setpoint to step from")
+    return
+  end
   applyAndSend(idBinding, function()
     Thermostat.applySetpoint(gDevice, celsius, nextComfortEndTime())
   end)

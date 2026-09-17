@@ -23,10 +23,23 @@ M.SETPOINT_EPSILON_C = 0.28
 
 -- ─── Temperature conversion ────────────────────────────────────────────────
 
+--- Every numeric field here comes from a cloud JSON body or from the proxy, so
+--- it can be absent, JSON-null or non-numeric. `tonumber` also turns "1e999"
+--- into infinity, which survives every `== nil` test downstream.
+--- @param value any
+--- @return number|nil
+local function finite(value)
+  local n = tonumber(value)
+  if n == nil or n ~= n or n == math.huge or n == -math.huge then
+    return nil
+  end
+  return n
+end
+
 --- @param n number Schluter wire value (°C × 100)
 --- @return number|nil celsius
 function M.schluterToC(n)
-  local v = tonumber(n)
+  local v = finite(n)
   if v == nil then
     return nil
   end
@@ -40,15 +53,23 @@ function M.cToSchluter(c)
 end
 
 --- @param c number Celsius
---- @return number fahrenheit
+--- @return number|nil fahrenheit
 function M.cToF(c)
-  return c * 9 / 5 + 32
+  local v = finite(c)
+  if v == nil then
+    return nil
+  end
+  return v * 9 / 5 + 32
 end
 
 --- @param f number Fahrenheit
---- @return number celsius
+--- @return number|nil celsius
 function M.fToC(f)
-  return (f - 32) * 5 / 9
+  local v = finite(f)
+  if v == nil then
+    return nil
+  end
+  return (v - 32) * 5 / 9
 end
 
 --- Control4's canonical temperature unit is decikelvin: (°C + 273.15) × 10.
@@ -59,7 +80,7 @@ M.KELVIN_OFFSET = 273.15
 --- @param value number
 --- @return number|nil celsius
 function M.c4ToC(value)
-  local n = tonumber(value)
+  local n = finite(value)
   if n == nil then
     return nil
   end
@@ -84,9 +105,12 @@ end
 
 --- Snap a temperature to the nearest 0.5° (Schluter setpoint resolution).
 --- @param temp number
---- @return number
+--- @return number|nil
 function M.normalize(temp)
-  local t = tonumber(temp)
+  local t = finite(temp)
+  if t == nil then
+    return nil
+  end
   local r = t % 0.5
   if r > 0.25 then
     return t + (0.5 - r)
@@ -194,13 +218,17 @@ end
 --- @param state SchluterState
 --- @param delta integer +1 or -1
 --- @param scale string "C" or "F"
---- @return number celsius
+--- @return number|nil celsius Nil when the device has reported no setpoint to step from.
 function M.stepSetpointC(state, delta, scale)
+  local current = finite(state.setpointC)
+  if current == nil then
+    return nil
+  end
   local celsius
   if scale == "C" then
-    celsius = state.setpointC + delta * 0.5
+    celsius = current + delta * 0.5
   else
-    celsius = M.fToC(M.round(M.cToF(state.setpointC)) + delta)
+    celsius = M.fToC(M.round(M.cToF(current)) + delta)
   end
   return math.max(state.minC, math.min(state.maxC, celsius))
 end
@@ -449,8 +477,11 @@ function M.applyScheduleEntry(device, c4Day, entryIndex, minutes, active, tempC)
         -- unchanged entry would otherwise drift TempFloor by the rounding error
         -- (e.g. 31.05 → 31.15 °C) and no longer match the Schluter app. The
         -- epsilon is below both a 1 °F and a 0.5 °C step, so genuine edits still
-        -- pass through while no-op re-saves preserve the device's value.
-        if math.abs(tempC - M.schluterToC(event.TempFloor)) >= M.SETPOINT_EPSILON_C then
+        -- pass through while no-op re-saves preserve the device's value. A
+        -- stored value that does not read as a number is not worth preserving,
+        -- so the edit is written.
+        local storedC = M.schluterToC(event.TempFloor)
+        if storedC == nil or math.abs(tempC - storedC) >= M.SETPOINT_EPSILON_C then
           event.TempFloor = tempFloor
         end
         event.Active = active == true
