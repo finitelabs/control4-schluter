@@ -55,7 +55,7 @@ local gReportedScale = nil
 --- drops a write entirely. After we POST a mode change we remember the intended
 --- regulation mode so that (1) handoffs still showing the old mode don't snap the
 --- UI back, and (2) a retry loop re-POSTs until the cloud confirms or we give up.
---- @type { mode: integer, ts: integer }|nil
+--- @type { mode: integer, setpoint: number|nil, ts: integer }|nil
 local gPending = nil
 --- Stop trusting the optimistic state after this long (cloud won: accept reality).
 local CONFIRM_TIMEOUT_S = 60
@@ -161,7 +161,14 @@ local function markPending()
   if not gDevice then
     return
   end
-  gPending = { mode = Thermostat.currentMode(gDevice), ts = os.time() }
+  local mode = Thermostat.currentMode(gDevice)
+  gPending = {
+    mode = mode,
+    -- Auto follows the schedule's setpoint, not the one written, so only a hold's
+    -- setpoint has to read back too.
+    setpoint = mode ~= Thermostat.MODE.AUTO and tonumber(gDevice.SetPointTemp) or nil,
+    ts = os.time(),
+  }
   scheduleConfirm()
 end
 
@@ -308,10 +315,25 @@ local function nextComfortEndTime()
   return Thermostat.nextEventEndTime(gDevice, os.time(), Thermostat.tzOffsetSeconds(gDevice.TZOffset))
 end
 
+--- The setpoint a proxy command carries, in °C. In a Fahrenheit project the
+--- proxy rounds CELSIUS to a whole degree (76 °F arrives as CELSIUS 25), so the
+--- value in the scale it displays is the exact one.
+--- @param tParams table
+--- @return number|nil
+local function setpointCelsius(tParams)
+  if gReportedScale == "F" then
+    local fahrenheit = tofinite(tonumber_expect_period(Select(tParams, "FAHRENHEIT")))
+    if fahrenheit ~= nil then
+      return Thermostat.fToC(fahrenheit)
+    end
+  end
+  return CelsiusFromParams(tParams)
+end
+
 --- @param idBinding integer
 --- @param tParams table
 local function handleSetpoint(idBinding, tParams)
-  local celsius = CelsiusFromParams(tParams)
+  local celsius = setpointCelsius(tParams)
   if celsius == nil then
     return
   end
@@ -353,18 +375,35 @@ function RFP.DEC_SETPOINT_HEAT(idBinding)
   adjustSetpoint(idBinding, -1)
 end
 
+--- Set Heat or Off (Away).
+--- @param idBinding integer
+--- @param mode string
+local function setHvacMode(idBinding, mode)
+  if mode ~= "Off" and mode ~= "Heat" then
+    log:warn("Ignoring an HVAC mode this thermostat does not have: %s", tostring(mode))
+    return
+  end
+  applyAndSend(idBinding, function()
+    Thermostat.applyHvacMode(gDevice, mode, gDevice.MinTemp)
+  end)
+end
+
 function RFP.SET_MODE_HEAT(idBinding)
   log:trace("RFP.SET_MODE_HEAT(%s)", idBinding)
-  applyAndSend(idBinding, function()
-    Thermostat.applyHvacMode(gDevice, "Heat", gDevice.MinTemp)
-  end)
+  setHvacMode(idBinding, "Heat")
 end
 
 function RFP.SET_MODE_OFF(idBinding)
   log:trace("RFP.SET_MODE_OFF(%s)", idBinding)
-  applyAndSend(idBinding, function()
-    Thermostat.applyHvacMode(gDevice, "Off", gDevice.MinTemp)
-  end)
+  setHvacMode(idBinding, "Off")
+end
+
+--- The thermostatV2 proxy forwards an HVAC mode change as SET_MODE_HVAC with
+--- MODE (measured on a 4.3 controller), not as SET_MODE_OFF / SET_MODE_HEAT.
+function RFP.SET_MODE_HVAC(idBinding, _strCommand, tParams)
+  local mode = (tParams or {}).MODE
+  log:trace("RFP.SET_MODE_HVAC(%s)", tostring(mode))
+  setHvacMode(idBinding, mode)
 end
 
 function RFP.SET_MODE_HOLD(idBinding, _strCommand, tParams)
@@ -439,7 +478,9 @@ function RFP.updateThermostat(idBinding, _strCommand, tParams)
   end
   device = device.Thermostat or device
   if gPending and (os.time() - gPending.ts) < CONFIRM_TIMEOUT_S then
-    if Thermostat.currentMode(device) == gPending.mode then
+    local confirmed = Thermostat.currentMode(device) == gPending.mode
+      and (gPending.setpoint == nil or tonumber(device.SetPointTemp) == gPending.setpoint)
+    if confirmed then
       -- Cloud caught up to our write; trust reality from here on.
       gPending = nil
       gDevice = device

@@ -337,6 +337,8 @@ end
 --- Grace period between aborting the long-poll and issuing the write. Cancelling
 --- a transfer may not release its connection synchronously.
 local WRITE_DELAY_MS = 600
+--- After a write, read back once Schluter has had time to apply it.
+local WRITE_READBACK_S = 5
 --- A write slower than this is worth surfacing: it means the POST was queued
 --- behind the notification connection rather than going out cleanly.
 local SLOW_WRITE_S = 5
@@ -362,6 +364,7 @@ login = function(retryBackoffS)
   -- below, and any pending retry, so the newest call wins.
   suspendNotifications()
   CancelTimer("SchluterReconcile")
+  CancelTimer("SchluterReadback")
   CancelTimer("SchluterLogin")
   CancelTimer("SchluterLoginRetry")
   gLoginPending = false
@@ -486,6 +489,7 @@ function OnDriverDestroyed()
   gNotifyGeneration = gNotifyGeneration + 1
   CancelTimer("SchluterNotify")
   CancelTimer("SchluterReconcile")
+  CancelTimer("SchluterReadback")
   CancelTimer("SchluterLogin")
   CancelTimer("SchluterLoginRetry")
   CancelTimer("UpdateCheck")
@@ -607,14 +611,18 @@ writeThermostat = function(serial, settings)
   -- before we POST; aborting a transfer does not necessarily free it inline.
   SetTimer("SchluterWrite_" .. serial, WRITE_DELAY_MS, function()
     local t0 = os.time()
-    client:setThermostat(serial, settings):next(function(updated)
+    client:setThermostat(serial, settings):next(function()
       -- Take the next slot in the refresh sequence so any /api/thermostats read
       -- that was already in flight when this write landed is discarded instead of
       -- handing the companion the pre-write state.
       gRefreshIssued = gRefreshIssued + 1
       gRefreshAccepted = gRefreshIssued
-      gState.devices[serial] = updated
-      handoff(serial)
+      -- Neither stored nor handed back: Schluter answers a write with only
+      -- {"Success":true}, so the result is usually the settings just sent, and a
+      -- companion handed them (now, or on a bind) would read them as the cloud
+      -- confirming its write before it has. The read below, or the next
+      -- notification, carries what Schluter stored.
+      SetTimer("SchluterReadback", WRITE_READBACK_S * ONE_SECOND, refreshThermostats)
       local elapsed = os.time() - t0
       if elapsed >= SLOW_WRITE_S then
         log:warn("Write to %s took %ds (long-poll connection contention)", serial, elapsed)
