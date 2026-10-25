@@ -489,6 +489,7 @@ function OnDriverDestroyed()
   gNotifyGeneration = gNotifyGeneration + 1
   CancelTimer("SchluterNotify")
   CancelTimer("SchluterReconcile")
+  CancelTimer("SchluterReadback")
   CancelTimer("SchluterLogin")
   CancelTimer("SchluterLoginRetry")
   CancelTimer("UpdateCheck")
