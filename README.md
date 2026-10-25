@@ -254,7 +254,7 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 - Removed
 -->
 
-## Unreleased
+## v20261025 - 2026-10-25
 
 ### Fixed
 
@@ -289,7 +289,7 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
   nothing.
 
 - Fixed a setpoint chosen in a Fahrenheit project being rounded to a whole
-  degree Celsius, so 76 °F was set as 77 °F.
+  degree Celsius, so 85 °F was set as 84 °F.
 
 - Fixed a setpoint changed during a temporary or permanent hold jumping back to
   the old value in the Control4 app, and not being sent again when Schluter
