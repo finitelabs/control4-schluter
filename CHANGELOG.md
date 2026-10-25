@@ -43,6 +43,10 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
   read no longer fails partway through.
 - Fixed the setpoint up and down buttons doing nothing but logging an error
   after an update that carried no setpoint.
+- Fixed turning the thermostat off or back to heat from the Control4 app doing
+  nothing.
+- Fixed a setpoint chosen in a Fahrenheit project being rounded to a whole
+  degree Celsius, so 76 °F was set as 77 °F.
 
 <!-- #ifndef DRIVERCENTRAL -->
 

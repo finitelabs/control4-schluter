@@ -308,10 +308,25 @@ local function nextComfortEndTime()
   return Thermostat.nextEventEndTime(gDevice, os.time(), Thermostat.tzOffsetSeconds(gDevice.TZOffset))
 end
 
+--- The setpoint a proxy command carries, in °C. In a Fahrenheit project the
+--- proxy rounds CELSIUS to a whole degree (76 °F arrives as CELSIUS 25), so the
+--- value in the scale it displays is the exact one.
+--- @param tParams table
+--- @return number|nil
+local function setpointCelsius(tParams)
+  if gReportedScale == "F" then
+    local fahrenheit = tofinite(tonumber_expect_period(Select(tParams, "FAHRENHEIT")))
+    if fahrenheit ~= nil then
+      return Thermostat.fToC(fahrenheit)
+    end
+  end
+  return CelsiusFromParams(tParams)
+end
+
 --- @param idBinding integer
 --- @param tParams table
 local function handleSetpoint(idBinding, tParams)
-  local celsius = CelsiusFromParams(tParams)
+  local celsius = setpointCelsius(tParams)
   if celsius == nil then
     return
   end
@@ -353,18 +368,35 @@ function RFP.DEC_SETPOINT_HEAT(idBinding)
   adjustSetpoint(idBinding, -1)
 end
 
+--- Set Heat or Off (Away).
+--- @param idBinding integer
+--- @param mode string
+local function setHvacMode(idBinding, mode)
+  if mode ~= "Off" and mode ~= "Heat" then
+    log:warn("Ignoring an HVAC mode this thermostat does not have: %s", tostring(mode))
+    return
+  end
+  applyAndSend(idBinding, function()
+    Thermostat.applyHvacMode(gDevice, mode, gDevice.MinTemp)
+  end)
+end
+
 function RFP.SET_MODE_HEAT(idBinding)
   log:trace("RFP.SET_MODE_HEAT(%s)", idBinding)
-  applyAndSend(idBinding, function()
-    Thermostat.applyHvacMode(gDevice, "Heat", gDevice.MinTemp)
-  end)
+  setHvacMode(idBinding, "Heat")
 end
 
 function RFP.SET_MODE_OFF(idBinding)
   log:trace("RFP.SET_MODE_OFF(%s)", idBinding)
-  applyAndSend(idBinding, function()
-    Thermostat.applyHvacMode(gDevice, "Off", gDevice.MinTemp)
-  end)
+  setHvacMode(idBinding, "Off")
+end
+
+--- The thermostatV2 proxy forwards an HVAC mode change as SET_MODE_HVAC with
+--- MODE (measured on a 4.3 controller), not as SET_MODE_OFF / SET_MODE_HEAT.
+function RFP.SET_MODE_HVAC(idBinding, _strCommand, tParams)
+  local mode = (tParams or {}).MODE
+  log:trace("RFP.SET_MODE_HVAC(%s)", tostring(mode))
+  setHvacMode(idBinding, mode)
 end
 
 function RFP.SET_MODE_HOLD(idBinding, _strCommand, tParams)
