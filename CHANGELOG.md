@@ -47,6 +47,9 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
   nothing.
 - Fixed a setpoint chosen in a Fahrenheit project being rounded to a whole
   degree Celsius, so 76 °F was set as 77 °F.
+- Fixed a setpoint changed during a temporary or permanent hold jumping back to
+  the old value in the Control4 app, and not being sent again when Schluter
+  missed it.
 
 <!-- #ifndef DRIVERCENTRAL -->
 

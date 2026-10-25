@@ -55,7 +55,7 @@ local gReportedScale = nil
 --- drops a write entirely. After we POST a mode change we remember the intended
 --- regulation mode so that (1) handoffs still showing the old mode don't snap the
 --- UI back, and (2) a retry loop re-POSTs until the cloud confirms or we give up.
---- @type { mode: integer, ts: integer }|nil
+--- @type { mode: integer, setpoint: number|nil, ts: integer }|nil
 local gPending = nil
 --- Stop trusting the optimistic state after this long (cloud won: accept reality).
 local CONFIRM_TIMEOUT_S = 60
@@ -161,7 +161,14 @@ local function markPending()
   if not gDevice then
     return
   end
-  gPending = { mode = Thermostat.currentMode(gDevice), ts = os.time() }
+  local mode = Thermostat.currentMode(gDevice)
+  gPending = {
+    mode = mode,
+    -- Auto follows the schedule's setpoint, not the one written, so only a hold's
+    -- setpoint has to read back too.
+    setpoint = mode ~= Thermostat.MODE.AUTO and tonumber(gDevice.SetPointTemp) or nil,
+    ts = os.time(),
+  }
   scheduleConfirm()
 end
 
@@ -471,7 +478,9 @@ function RFP.updateThermostat(idBinding, _strCommand, tParams)
   end
   device = device.Thermostat or device
   if gPending and (os.time() - gPending.ts) < CONFIRM_TIMEOUT_S then
-    if Thermostat.currentMode(device) == gPending.mode then
+    local confirmed = Thermostat.currentMode(device) == gPending.mode
+      and (gPending.setpoint == nil or tonumber(device.SetPointTemp) == gPending.setpoint)
+    if confirmed then
       -- Cloud caught up to our write; trust reality from here on.
       gPending = nil
       gDevice = device

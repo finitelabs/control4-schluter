@@ -1,5 +1,6 @@
 -- What the companion writes for the HVAC mode and setpoint commands the
--- thermostatV2 proxy sends.
+-- thermostatV2 proxy sends, and how its optimistic write holds against the
+-- handoffs the account sends after it.
 --
 -- Run from the driver root:
 --   make test
@@ -11,6 +12,7 @@
 local T = require("testlib")
 
 require("c4_shim")
+require("drivers-common-public.global.timer")
 
 local constants = require("constants")
 
@@ -23,6 +25,14 @@ local ACCOUNT_BINDING = 5002
 local sends = {}
 C4.SendToProxy = function(_, idBinding, command, tParams)
   table.insert(sends, { idBinding = idBinding, command = command, params = tParams })
+end
+
+local timers = {}
+SetTimer = function(name, delay, callback, repeating)
+  timers[name] = { delay = delay, callback = callback, repeating = repeating }
+end
+CancelTimer = function(name)
+  timers[name] = nil
 end
 
 dofile(DRIVER)
@@ -58,6 +68,24 @@ local function lastWrite()
   return written
 end
 
+local function lastSetpoint()
+  for i = #sends, 1, -1 do
+    if sends[i].command == "HEAT_SETPOINT_CHANGED" then
+      return tonumber(sends[i].params.SETPOINT)
+    end
+  end
+end
+
+local function writesToAccount()
+  local n = 0
+  for _, send in ipairs(sends) do
+    if send.idBinding == ACCOUNT_BINDING and send.command == constants.CMD.SET_THERMOSTAT then
+      n = n + 1
+    end
+  end
+  return n
+end
+
 T.section("a Fahrenheit project's setpoint is read in Fahrenheit")
 -- Captured from the thermostatV2 proxy on a 4.3 controller in a Fahrenheit
 -- project, setting 24.5 C: CELSIUS arrives rounded to a whole degree.
@@ -88,5 +116,22 @@ T.eq("Heat resumes the schedule", lastWrite() and lastWrite().RegulationMode, 1)
 sends = {}
 RFP.SET_MODE_HVAC(PROXY_BINDING, "SET_MODE_HVAC", { MODE = "Cool" })
 T.eq("a mode it does not have writes nothing", lastWrite(), nil)
+
+T.section("a setpoint change within a hold waits for the new setpoint")
+RFP.goOffline(ACCOUNT_BINDING, "goOffline")
+handOver(device({ RegulationMode = 2, SetPointTemp = 2200 }))
+RFP.SET_SCALE(PROXY_BINDING, "SET_SCALE", { SCALE = "CELSIUS" })
+sends = {}
+RFP.SET_SETPOINT_HEAT(PROXY_BINDING, "SET_SETPOINT_HEAT", { CELSIUS = "25" })
+T.eq("shows 25 C at once", lastSetpoint(), 25)
+handOver(device({ RegulationMode = 2, SetPointTemp = 2200 }))
+T.eq("a read still in Comfort at 22 C does not put it back", lastSetpoint(), 25)
+sends = {}
+timers.SchluterConfirm.callback()
+T.eq("the write is sent again", writesToAccount(), 1)
+handOver(device({ RegulationMode = 2, SetPointTemp = 2500 }))
+sends = {}
+timers.SchluterConfirm.callback()
+T.eq("the read at 25 C ends the wait", writesToAccount(), 0)
 
 T.finish()
