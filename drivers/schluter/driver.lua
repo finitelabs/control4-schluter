@@ -610,17 +610,17 @@ writeThermostat = function(serial, settings)
   -- before we POST; aborting a transfer does not necessarily free it inline.
   SetTimer("SchluterWrite_" .. serial, WRITE_DELAY_MS, function()
     local t0 = os.time()
-    client:setThermostat(serial, settings):next(function(updated)
+    client:setThermostat(serial, settings):next(function()
       -- Take the next slot in the refresh sequence so any /api/thermostats read
       -- that was already in flight when this write landed is discarded instead of
       -- handing the companion the pre-write state.
       gRefreshIssued = gRefreshIssued + 1
       gRefreshAccepted = gRefreshIssued
-      -- Not handed back: Schluter answers a write with only {"Success":true}, so
-      -- `updated` is usually the settings just sent, and an echo would read as the
-      -- cloud confirming the write and end the companion's wait before it has.
-      -- The read below, or the next notification, carries what Schluter stored.
-      gState.devices[serial] = updated
+      -- Neither stored nor handed back: Schluter answers a write with only
+      -- {"Success":true}, so the result is usually the settings just sent, and a
+      -- companion handed them (now, or on a bind) would read them as the cloud
+      -- confirming its write before it has. The read below, or the next
+      -- notification, carries what Schluter stored.
       SetTimer("SchluterReadback", WRITE_READBACK_S * ONE_SECOND, refreshThermostats)
       local elapsed = os.time() - t0
       if elapsed >= SLOW_WRITE_S then

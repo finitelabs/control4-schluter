@@ -122,6 +122,12 @@ T.eq("nothing is handed back", #handoffs(), 0)
 T.truthy("a read-back is scheduled", timers.SchluterReadback)
 T.eq("five seconds later", timers.SchluterReadback and timers.SchluterReadback.delay, 5 * 1000)
 
+T.section("a companion that binds before the read-back gets the cloud's state")
+OBC[bindingId](bindingId, "SCHLUTER_THERMOSTAT", true)
+local onBind = handoffs()[1]
+T.eq("not the unconfirmed write", onBind and onBind.SetPointTemp, 3111)
+sends = {}
+
 T.section("the read-back hands over what the cloud stored")
 -- Schluter has not applied it yet: the companion must see the old state, so its
 -- pending write stays pending and its retry re-sends.
