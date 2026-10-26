@@ -148,7 +148,7 @@ account to enumerate them.
 
 # Schluter API details
 
-## `/api/defaults` exists (we were not using it)
+## `/api/defaults` exists
 
     GET /api/defaults?sessionId=<sid>&serialnumber=<serial>
 
