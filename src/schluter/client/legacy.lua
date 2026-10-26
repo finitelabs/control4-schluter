@@ -1,8 +1,8 @@
 --- Legacy Schluter backend — the undocumented myschluter.com app API.
 ---
---- This is the same REST surface the Schluter mobile app / web dashboard and the
---- original (now unmaintained) Control4 driver used. The client owns its own
---- session: authenticate() stores the SessionId and every other call uses it.
+--- This is the same REST surface the Schluter mobile app and web dashboard use.
+--- The client owns its own session: authenticate() stores the SessionId and
+--- every other call uses it.
 --- All methods return a Deferred that resolves with the decoded JSON body (or
 --- rejects). See docs/schluter-api-reference.md.
 ---
@@ -163,13 +163,12 @@ function Client:getThermostat(serialNumber)
   end)
 end
 
---- The only fields the server accepts on a write. Taken from the official app,
---- which serializes its POST body against `json.shared.ThermostatPost` and so
---- sends exactly these (see docs/schluter-api-reference.md). Everything else on
---- the thermostat object is read-only and echoing it back is meaningless —
---- notably `SetPointTemp`, which the server derives from ManualTemperature /
---- ComfortTemperature / the active schedule. Writing it does nothing, which is
---- why a bare SetPointTemp write never took effect in Manual mode.
+--- The only fields the server accepts on a write (see
+--- docs/schluter-api-reference.md). Everything else on the thermostat object is
+--- read-only and echoing it back is meaningless, notably `SetPointTemp`, which
+--- the server derives from ManualTemperature / ComfortTemperature / the active
+--- schedule. Writing it does nothing, which is why a bare SetPointTemp write
+--- never took effect in Manual mode.
 local WRITABLE_FIELDS = {
   "RegulationMode",
   "ManualTemperature",

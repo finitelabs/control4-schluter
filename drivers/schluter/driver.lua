@@ -264,11 +264,11 @@ armNotifications = function(generation, backoffS)
     end
     -- The notification body embeds the changed thermostat in full (same 34-field
     -- object /api/thermostats returns, Schedules included), so consume it
-    -- directly instead of re-reading the whole account on every poll. That is
-    -- what the official app does, and it removes a request per cycle from a host
-    -- that is already holding this long-poll open. Only fall back to a full read
-    -- when the payload carries no usable device, or the serial is one we have
-    -- not seen (a thermostat added or moved between groups).
+    -- directly instead of re-reading the whole account on every poll. That
+    -- removes a request per cycle from a host that is already holding this
+    -- long-poll open. Only fall back to a full read when the payload carries no
+    -- usable device, or the serial is one we have not seen (a thermostat added
+    -- or moved between groups).
     local device = obj and obj.Thermostat
     local serial = type(device) == "table" and tostring(device.SerialNumber) or nil
     if obj and tonumber(obj.Action) == ACTION.REMOVED and serial then
