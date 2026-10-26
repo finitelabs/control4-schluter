@@ -26,9 +26,8 @@ M.BINDING_NAMESPACE = "schluter"
 M.THERMOSTAT_CLASS = "SCHLUTER_THERMOSTAT"
 
 --- `Action` values on a /api/notification response, alongside `SequenceNr` and
---- the embedded `Thermostat`. Taken from the official app's notification handler
---- (com.ojelectronics.microline.DataHelper): 1 and 2 both mean the thermostat was
---- added or updated, 3 means it was removed from the account.
+--- the embedded `Thermostat`: 1 and 2 both mean the thermostat was added or
+--- updated, 3 means it was removed from the account.
 M.NOTIFY_ACTION = {
   ADDED = 1,
   UPDATED = 2,

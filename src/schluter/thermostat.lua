@@ -156,9 +156,9 @@ end
 function M.capabilities(state)
   return {
     allowedHvacModes = "Off,Heat",
-    -- Heat-setpoint model (like the original NuHeat driver): a single Heat
-    -- setpoint, not the single_setpoint model. The C4 schedule editor only lets
-    -- you pick a temperature in the heat-setpoint model.
+    -- Heat-setpoint model: a single Heat setpoint, not the single_setpoint
+    -- model. The C4 schedule editor only lets you pick a temperature in the
+    -- heat-setpoint model.
     hasSingleSetpoint = false,
     canHeat = true,
     canCool = false,
@@ -375,9 +375,9 @@ end
 -- (1=Mon .. 7=Sun). Each entry = `{ WeekDayGrpNo, Events[1..6] }`, each event =
 -- `{ Clock "HH:MM:SS", ScheduleType, TempFloor (°C×100), Active }`. Days sharing
 -- a `WeekDayGrpNo` share one program, so editing one propagates to the whole
--- group — matching the Schluter thermostat's own grouping behavior (and the old
--- driver). Control4's thermostatV2 schedule is per-day (DayIndex 0=Sun .. 6=Sat)
--- with EntryIndex 0..5, mapped 1:1 to the device's 6 events. Heat-only.
+-- group, matching the Schluter thermostat's own grouping behavior. Control4's
+-- thermostatV2 schedule is per-day (DayIndex 0=Sun .. 6=Sat) with EntryIndex
+-- 0..5, mapped 1:1 to the device's 6 events. Heat-only.
 
 --- Schluter schedule array index (1=Mon..7=Sun) -> C4 DayIndex (0=Sun..6=Sat).
 M.SCHLUTER_TO_C4_DAY = { 1, 2, 3, 4, 5, 6, 0 }

@@ -46,8 +46,8 @@ local gDevice = nil
 local gState = nil
 --- The display scale ("C"/"F") we last reported to the proxy, resolved from
 --- Director in OnDriverLateInit and re-resolved whenever it changes. Schedule
---- setpoints are pushed as integer values in this scale (like the NuHeat
---- Signature driver), matching the editor's grid so they don't drift.
+--- setpoints are pushed as integer values in this scale, matching the editor's
+--- grid so they don't drift.
 local gReportedScale = nil
 
 --- Pending optimistic write. Schluter's cloud is slow to reflect changes —
@@ -177,13 +177,12 @@ end
 --- Heat-only placeholder for the cool column (°C). Schluter never cools, but the
 --- proxy's schedule editor still renders a cool setpoint per entry; a 0 there is
 --- read as an unset sentinel (0 K ≈ -460 °F). A high value shows sanely and never
---- triggers cooling. 35 °C = 95 °F, the convention other heat-only floor drivers use.
+--- triggers cooling. 35 °C = 95 °F.
 local COOL_PLACEHOLDER_C = 35
 
---- Notify the proxy of one schedule entry. Following the NuHeat Signature driver
---- (same OJ platform), the setpoint is sent as an integer in the project's
---- display scale with a matching Units field — integer °F + "F", or integer °C +
---- "C" — so it lands on the editor's grid without drifting.
+--- Notify the proxy of one schedule entry. The setpoint is sent as an integer in
+--- the project's display scale with a matching Units field (integer °F + "F", or
+--- integer °C + "C"), so it lands on the editor's grid without drifting.
 --- @param row table { c4Day, entryIndex, minutes, active, tempC }
 local function pushScheduleEntry(row)
   if row.tempC == nil then

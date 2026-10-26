@@ -1,8 +1,6 @@
 # NuHeat Signature — API & Driver Design Reference
 
-Reverse-engineered from the defunct `shard7/thermostat_ip_nuheat_signature` (thermostat
-companion) and `..._signature_master` (account/controller) drivers on Sourcebot. This is
-the implementation blueprint for `control4-nuheat`.
+This is the implementation blueprint for `control4-nuheat`.
 
 ## Architecture (mirrors control4-esphome)
 
@@ -52,7 +50,7 @@ Session id is passed as the `sessionid` query param on every authenticated call.
 | Get thermostat | GET | `/api/thermostat?sessionid=<sid>&serialnumber=<sn>` | — |
 | Set thermostat | POST | `/api/thermostat?sessionid=<sid>&serialnumber=<sn>` | body = settings object |
 | Real-time notify | GET | `/api/notification?sessionid=<sid>&sequencenr=<n>` | long-poll (~300s) |
-| Energy usage | GET | (stubbed in old driver, not implemented) | — |
+| Energy usage | GET | (not implemented) | — |
 
 ### Auth response
 `{ ErrorCode, SessionId }`. `ErrorCode == 0` and non-empty `SessionId` ⇒ logged in.
@@ -61,9 +59,7 @@ Session id is passed as the `sessionid` query param on every authenticated call.
 ### Real-time notifications (native — no third-party driver needed)
 After login: `GET /api/notification?sessionid=<sid>&sequencenr=<n>` on a long-lived
 connection (~5 min timeout). Response carries `SequenceNr`; on each response, re-request
-with `sequencenr = SequenceNr + 1`. On timeout/offline, re-issue the request. This
-replaces the old annex4 LiNK dependency — the old thermostat driver only needed annex4 for
-its own cloud dashboard, not for thermostat data.
+with `sequencenr = SequenceNr + 1`. On timeout/offline, re-issue the request.
 
 ## Thermostat data model (verbatim NuHeat fields)
 
@@ -85,7 +81,7 @@ read:  temp_c = (Temperature / 100)               ; temp_f = CToF(Temperature / 
 write: SetPointTemp = CELSIUS * 100
 CToF(t) = t * 9/5 + 32 ;  FToC(t) = (t - 32) * 5/9
 ```
-Snap setpoints to 0.5° (`_normalizeTemp`). Limits: °F 41–158, °C 5–70 (0.5° res).
+Snap setpoints to 0.5°. Limits: °F 41–158, °C 5–70 (0.5° res).
 Away/Off sentinel: `SetPointTemp == 500` (= 5.00 °C) with `ScheduleMode == 3`.
 
 ### Modes — `ScheduleMode` enum
@@ -105,8 +101,8 @@ Hold modes: `2 Hours` (Until, now+2h UTC), `Hold Until` (Until, explicit datetim
 `WeekDayGrpNo` share events. Day index maps:
 ```
 NuHeat 1..7 = Mon..Sun ;  C4 0..6 = Sun..Sat
-NuheatToControl4 = {1,2,3,4,5,6,0}
-Control4ToNuheat = {[0]=7,[1]=1,[2]=2,[3]=3,[4]=4,[5]=5,[6]=6}
+NuHeat -> C4 = {1,2,3,4,5,6,0}
+C4 -> NuHeat = {[0]=7,[1]=1,[2]=2,[3]=3,[4]=4,[5]=5,[6]=6}
 ```
 
 ## Account → companion handoff & dynamic capabilities
@@ -150,12 +146,7 @@ account to enumerate them.
 
 ---
 
-# Findings from the official Android app (com.schluter.app 1.8.0)
-
-Decompiled with `jadx`. The app is not obfuscated and the relevant classes are
-`json.DataFetcher`, `json.shared.ThermostatPost` and
-`com.ojelectronics.microline.DataHelper`. It is an OJ Electronics codebase; the
-Schluter build only differs by `BaseUrl` and `Config.Application`.
+# Schluter API details
 
 ## `/api/defaults` exists (we were not using it)
 
@@ -181,19 +172,17 @@ A captured response is in `samples-defaults-response.json`.
 
 ## The POST body is a restricted field set
 
-`DataFetcher.ThermostatPostFetch` serializes with
-`new Gson().toJson(thermostat, ThermostatPost.class)`, so only the fields
-declared on `json.shared.ThermostatPost` are ever sent:
+A settings POST carries only these fields:
 
     RegulationMode, ManualTemperature, ComfortTemperature, ComfortEndTime,
     Schedules, VacationEnabled, VacationBeginDay, VacationEndDay,
     VacationTemperature, LastPrimaryModeIsAuto, KwCharge, FloorArea
 
-Notably **`SetPointTemp` is never written** — it is derived server-side from
-`ManualTemperature` / `ComfortTemperature` / the schedule, which matches what we
-observed on the device. Everything else in the thermostat object
-(`SerialNumber`, `Online`, `Temperature`, `MinTemp`/`MaxTemp`, `SWVersion`,
-`Support`, `Room`, …) is read-only and the app never echoes it back.
+Notably **`SetPointTemp` is not among them**: the server derives it from
+`ManualTemperature` / `ComfortTemperature` / the schedule, as observed on the
+device. Everything else in the thermostat object (`SerialNumber`, `Online`,
+`Temperature`, `MinTemp`/`MaxTemp`, `SWVersion`, `Support`, `Room`, …) is
+read-only.
 
 Measured: body size does not affect POST latency (21 B, 3.8 kB and 4.4 kB bodies
 all completed in ~0.30 s, 15/15). Trimming is a correctness change, not a
@@ -201,21 +190,19 @@ performance one.
 
 ## The notification response carries the changed thermostat inline
 
-`DataHelper` (the `runNotifications` loop) shows the app does **not** re-read the
-thermostat list on every notification. The notification body contains:
+The notification body contains:
 
 - `Thermostat` — the full changed thermostat object
 - `Action` — 1/2 = added or updated, 3 = removed
 - `SequenceNr`
 
-The app patches its in-memory list from that embedded object and only issues a
-full `GET /api/thermostats` when the thermostat is unknown or has changed group.
-Our driver re-GETs the whole account on every notification, which is an extra
-request per cycle against a host that is already holding the long-poll open.
+A client can patch its thermostat list from that embedded object and only issue
+a full `GET /api/thermostats` when the thermostat is unknown or has changed
+group. Re-reading the whole account on every notification is an extra request
+per cycle against a host that is already holding the long-poll open.
 
-Two smaller differences:
+Two smaller points:
 
-- The app re-requests with the sequence number **as received**
-  (`DataHelper.getSequenceNr()`), not `SequenceNr + 1` as we do.
-- On a failed poll it sleeps 5 s and retries, with a single `runNotifications`
-  flag guarding against concurrent loops.
+- The next poll can carry the sequence number **as received**; the driver sends
+  `SequenceNr + 1`.
+- After a failed poll, wait 5 s before retrying, and keep to a single poll loop.
