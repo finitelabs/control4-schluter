@@ -18,6 +18,18 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 - Removed
 -->
 
+<!-- #ifdef DRIVERCENTRAL -->
+
+## Unreleased
+
+### Changed
+
+- Changed Automatic Updates to one setting for the Schluter driver and its
+  Schluter Thermostat drivers: changing it on any of them now changes it on all
+  of them, so the drivers update together.
+
+<!-- #endif -->
+
 ## v20261025 - 2026-10-25
 
 ### Fixed

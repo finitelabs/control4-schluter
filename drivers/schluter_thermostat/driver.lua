@@ -28,6 +28,9 @@ local log = require("lib.logging")
 local Thermostat = require("schluter.thermostat")
 local displayScale = require("schluter.display_scale")
 local constants = require("constants")
+--#ifdef DRIVERCENTRAL
+local updateSettings = require("lib.update-settings")
+--#endif
 
 --- thermostatV2 proxy (this driver's primary proxy).
 local PROXY_BINDING = 5001
@@ -541,6 +544,21 @@ end
 function OPC.Driver_Version()
   C4:UpdateProperty("Driver Version", C4:GetDriverConfigInfo("version"))
 end
+
+--#ifdef DRIVERCENTRAL
+function OPC.Automatic_Updates(propertyValue)
+  if not gInitialized then
+    return
+  end
+  updateSettings:share("Automatic Updates", propertyValue)
+end
+
+--- An update setting changed on another item.
+function EC.SET_UPDATE_SETTING(params)
+  log:trace("EC.SET_UPDATE_SETTING(%s)", params)
+  updateSettings:take(params)
+end
+--#endif
 
 function OnDriverInit()
   --#ifdef DRIVERCENTRAL
