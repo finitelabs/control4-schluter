@@ -14,10 +14,6 @@ DC_X = nil
 DC_FILENAME = "schluter.c4z"
 --#else
 DRIVER_GITHUB_REPO = "finitelabs/control4-schluter"
-DRIVER_FILENAMES = {
-  "schluter.c4z",
-  "schluter_thermostat.c4z",
-}
 --#endif
 
 require("lib.utils")
@@ -29,6 +25,7 @@ JSON = require("JSON")
 
 local log = require("lib.logging")
 local bindings = require("lib.bindings")
+local updateSettings = require("lib.update-settings")
 --#ifndef DRIVERCENTRAL
 local githubUpdater = require("lib.github-updater")
 --#endif
@@ -92,21 +89,6 @@ local function getAccountDriverIds()
   table.sort(ids)
   return ids
 end
-
---#ifndef DRIVERCENTRAL
---- Mirror an updater property to the other account instances so they stay
---- consistent (only the leader instance actually performs updates).
---- @param propertyName string
---- @param propertyValue string
-local function syncPropertyToOtherInstances(propertyName, propertyValue)
-  local myId = C4:GetDeviceID()
-  for _, deviceId in ipairs(getAccountDriverIds()) do
-    if deviceId ~= myId then
-      SetDeviceProperties(deviceId, { [propertyName] = propertyValue }, true)
-    end
-  end
-end
---#endif
 
 -- ─── Companion handoff ─────────────────────────────────────────────────────
 
@@ -423,7 +405,12 @@ end
 function UpdateDrivers(forceUpdate)
   log:trace("UpdateDrivers(%s)", forceUpdate)
   githubUpdater
-    :updateAll(DRIVER_GITHUB_REPO, DRIVER_FILENAMES, Properties["Update Channel"] == "Prerelease", forceUpdate)
+    :updateAll(
+      DRIVER_GITHUB_REPO,
+      require("lib.driver-filenames"),
+      Properties["Update Channel"] == "Prerelease",
+      forceUpdate
+    )
     :next(function(updatedDrivers)
       if updatedDrivers and #updatedDrivers > 0 then
         log:info("Updated driver(s): %s", table.concat(updatedDrivers, ","))
@@ -543,12 +530,10 @@ function OPC.Password()
 end
 
 function OPC.Automatic_Updates(propertyValue)
-  --#ifndef DRIVERCENTRAL
   if not gInitialized then
     return
   end
-  syncPropertyToOtherInstances("Automatic Updates", propertyValue)
-  --#endif
+  updateSettings:share("Automatic Updates", propertyValue)
 end
 
 --#ifndef DRIVERCENTRAL
@@ -556,7 +541,7 @@ function OPC.Update_Channel(propertyValue)
   if not gInitialized then
     return
   end
-  syncPropertyToOtherInstances("Update Channel", propertyValue)
+  updateSettings:share("Update Channel", propertyValue)
 end
 --#endif
 
@@ -691,3 +676,9 @@ function EC.Update_Drivers()
   UpdateDrivers(true)
 end
 --#endif
+
+--- An update setting changed on another item.
+function EC.SET_UPDATE_SETTING(params)
+  log:trace("EC.SET_UPDATE_SETTING(%s)", params)
+  updateSettings:take(params)
+end
