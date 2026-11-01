@@ -106,9 +106,6 @@ it can be added.
 
 ## Driver Installation
 
-Driver installation and setup are similar to most other ip-based drivers. Below
-is an outline of the basic steps for your convenience.
-
 1. Download the latest `control4-schluter.zip` from
    [Github](https://github.com/finitelabs/control4-schluter/releases/latest).
 
