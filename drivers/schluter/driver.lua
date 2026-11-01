@@ -476,6 +476,10 @@ function OnDriverLateInit()
   login()
 end
 
+--#ifdef DRIVERCENTRAL
+OnDriverLateInit = diagnostics:wrapLateInit(OnDriverLateInit)
+--#endif
+
 function OnDriverDestroyed()
   gNotifyGeneration = gNotifyGeneration + 1
   CancelTimer("SchluterNotify")

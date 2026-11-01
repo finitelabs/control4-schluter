@@ -615,3 +615,7 @@ function OnDriverLateInit()
   C4:UpdateProperty("Driver Status", "Waiting for thermostat")
   SendToProxy(PROXY_BINDING, "ONLINE_CHANGED", { STATE = false }, "NOTIFY")
 end
+
+--#ifdef DRIVERCENTRAL
+OnDriverLateInit = diagnostics:wrapLateInit(OnDriverLateInit)
+--#endif
