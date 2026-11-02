@@ -6,12 +6,10 @@
 -- or:
 --   ./test/run_test.sh test_sensor_binding_params.lua
 --
--- The helpers' own behaviour is covered by test_sensor_params.lua. What is
--- checked here is the call site: C4-THERM reads a bound temperature from
--- tParams["CELSIUS"] and never looks at VALUE or SCALE, and it reads
--- tParams["TIMESTAMP"] into a Dbg:Trace concatenation before testing it, so a
--- payload without one crashes the thermostat at its driver.lua:2982 before the
--- reading is ever considered.
+-- The helpers' own behavior is covered by test_sensor_params.lua. What is
+-- checked here is the call site: a thermostat bound to a sensor reads the
+-- temperature from CELSIUS and never looks at VALUE or SCALE, and a payload
+-- without TIMESTAMP crashes it before the reading is ever considered.
 --
 -- Regression test for DRV-121.
 
@@ -86,21 +84,22 @@ local emitted = findSend(handOver(), TEMP_OUTPUT_BINDING, "VALUE_CHANGED")
 T.check("the handoff emits a VALUE_CHANGED on the output binding", emitted ~= nil, "no send")
 T.eq("VALUE is the measured temperature", emitted.params.VALUE, 21.5)
 T.eq("SCALE names the measured scale", emitted.params.SCALE, "CELSIUS")
-T.eq("CELSIUS is what C4-THERM reads", emitted.params.CELSIUS, 21.5)
+T.eq("CELSIUS is what a bound thermostat reads", emitted.params.CELSIUS, 21.5)
 T.eq("FAHRENHEIT is converted alongside", emitted.params.FAHRENHEIT, 70.7)
 
 --------------------------------------------------------------------------------
 T.section("TIMESTAMP is present and fresh")
 --------------------------------------------------------------------------------
 
--- C4-THERM crashes on a payload with no stamp and discards one stamped older
--- than 900 seconds, so both properties are asserted rather than presence alone.
+-- A bound thermostat crashes on a payload with no stamp and discards one
+-- stamped older than 900 seconds, so both properties are asserted rather than
+-- presence alone.
 local now = os.time()
 local stamp = emitted.params.TIMESTAMP
 
 T.check("TIMESTAMP is a number", type(stamp) == "number", type(stamp))
 T.check(
-  "TIMESTAMP is epoch seconds inside C4-THERM's 900s gate",
+  "TIMESTAMP is epoch seconds inside a thermostat's 900s gate",
   type(stamp) == "number" and stamp > now - 900 and stamp <= now,
   stamp
 )
