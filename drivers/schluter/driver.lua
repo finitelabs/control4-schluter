@@ -674,6 +674,9 @@ function EC.Reset_Driver(tParams)
     gState.devices = {}
     client:logout()
     C4:UpdateProperty("Login Status", "")
+    --#ifdef DRIVERCENTRAL
+    UpdateProperty("Cloud Monitoring", "Enabled", true)
+    --#endif
     login()
   end
 end
