@@ -19,12 +19,8 @@ ______________________________________________________________________
 
 # <span style="color:#f78d1f">Overview</span>
 
-<!-- #ifndef DRIVERCENTRAL -->
-
 > DISCLAIMER: This software is neither affiliated with nor endorsed by either
 > Control4 or Schluter-Systems.
-
-<!-- #endif -->
 
 Integrate [Schluter DITRA-HEAT-E-WiFi](https://www.schluter.com) floor-heating
 thermostats into Control4. This account driver signs in to your Schluter
