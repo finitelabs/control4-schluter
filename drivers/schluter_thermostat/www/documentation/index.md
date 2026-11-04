@@ -19,12 +19,8 @@ ______________________________________________________________________
 
 # <span style="color:#f78d1f">Overview</span>
 
-<!-- #ifndef DRIVERCENTRAL -->
-
 > DISCLAIMER: This software is neither affiliated with nor endorsed by either
 > Control4 or Schluter-Systems.
-
-<!-- #endif -->
 
 This driver represents a single Schluter DITRA-HEAT floor-heating thermostat as
 a native Control4 thermostat, through the Control4 ThermostatV2 proxy. It does
