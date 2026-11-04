@@ -8,7 +8,7 @@ Marketing images for the Schluter DITRA-HEAT listing (the listing's DriverCentra
 | `banners/launch-post-2400x1200` | 2400x1200 | Launch posts (c4forums, Reddit, Discord) |
 | `banners/facts-strip-2400x200` | 2400x200 | The first image in the listing's description: four facts in a row |
 
-`assets/` holds what the pages share: the Finite Labs logo, and the DITRA-HEAT mark as `brand-mark.png`, exported from this repo's `resources/Driver Icons.sketch` (the art its icons use). Schluter-Systems gives logos only to its authorized dealers and publishes no rules for other companies; its site terms (https://www.schluter.com, terms and conditions, sections 6 and 13) reserve its trademarks.
+`assets/` holds what the pages share: the Finite Labs logo, and the DITRA-HEAT mark as `brand-mark.png`, exported from this repo's `resources/Driver Icons.sketch` (the art its icons use). Schluter-Systems gives logos only to its authorized dealers and publishes no rules for other companies; its site terms (https://www.schluter.com, terms and conditions, sections 6 and 13) reserve its trademarks. We haven't obtained permission; the mark is used only to name the thermostats the driver works with.
 
 ## Rendering
 
