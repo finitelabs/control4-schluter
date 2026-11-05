@@ -295,6 +295,21 @@ do
   T.eq("and no reconcile poll is armed", timers.SchluterReconcile, nil)
 end
 
+T.section("A login still in flight that fails after the stop leaves the status saying why")
+do
+  load({ AC = 1, AS = "License Activated" })
+  EC.Reconnect()
+  hold.login = true
+  fire("SchluterLogin")
+  local pending = hold.login
+  hold.login = nil
+  cloud.answer = { AC = 0, AS = "Trial Expired" }
+  tick(30)
+  pending:reject({ message = "Invalid credentials" })
+  T.eq("Login Status", Properties["Login Status"], "No active license")
+  T.eq("Driver Status", Properties["Driver Status"], "No active license")
+end
+
 T.section("A license back logs the account in again at once")
 do
   load({ AC = -1, AS = "Trial Running, 1 Hours Remaining" })

@@ -404,6 +404,9 @@ login = function(retryBackoffS)
     end, function(err)
       gLoginPending = false
       client:logout()
+      if not licensed() then
+        return
+      end
       C4:UpdateProperty("Login Status", err.message or "Login failed")
       log:warn("Login failed: %s", err.message)
       -- ErrorCode 1/2 is the server rejecting the credentials themselves (see
