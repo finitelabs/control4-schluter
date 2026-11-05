@@ -8,7 +8,9 @@ Marketing images for the Schluter DITRA-HEAT DriverCentral listing (no product n
 | `banners/launch-post-2400x1200` | 2400x1200 | Launch posts (c4forums, Reddit, Discord) |
 | `banners/facts-strip-2400x200` | 2400x200 | The first image in the listing's description: four facts in a row |
 
-`assets/` holds what the pages share: the Finite Labs logo, and the DITRA-HEAT mark as `brand-mark.png`, exported from this repo's `resources/Driver Icons.sketch` (the art its icons use). Schluter-Systems gives logos only to its authorized dealers and publishes no rules for other companies; its site terms (https://www.schluter.com, terms and conditions, sections 6 and 13) reserve its trademarks. We haven't obtained permission; the mark is used only to name the thermostats the driver works with.
+`assets/` holds what the pages share: the Finite Labs logo, `scene.js`, which draws the banners' art, and the DITRA-HEAT mark as `brand-mark.png`, exported from this repo's `resources/Driver Icons.sketch`: the mark our icons use, drawn for them rather than taken from Schluter, which gives logo files only to its authorized dealers. Schluter-Systems publishes no rules for other companies; its site terms (https://www.schluter.com, terms and conditions, sections 6 and 13) reserve its trademarks. We haven't obtained permission; the mark is used only to name the thermostats the driver works with.
+
+The banners' art is `dial`: a round thermostat dial, with floor heat in the gap below, set on each banner's `<svg class="scene">`. The template's DriverCentral README lists the styles, and the headline, chips and subtitle shrink until they end clear of the art.
 
 ## Rendering
 
