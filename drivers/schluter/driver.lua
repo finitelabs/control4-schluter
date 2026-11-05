@@ -8,11 +8,7 @@
 -- notification long-poll and serializes/coalesces companion writes because the
 -- cloud host will not run a POST alongside the long-poll it holds open.
 
---#ifdef DRIVERCENTRAL
-DC_PID = 0 -- TODO: Assign DriverCentral product ID
-DC_X = nil
-DC_FILENAME = "schluter.c4z"
---#else
+--#ifndef DRIVERCENTRAL
 DRIVER_GITHUB_REPO = "finitelabs/control4-schluter"
 --#endif
 
@@ -27,6 +23,7 @@ local log = require("lib.logging")
 local bindings = require("lib.bindings")
 local updateSettings = require("lib.update-settings")
 --#ifdef DRIVERCENTRAL
+local drivercentral = require("lib.drivercentral")
 local supportCode = require("lib.support-code")
 local diagnostics = require("lib.diagnostics")
 --#endif
@@ -36,6 +33,17 @@ local githubUpdater = require("lib.github-updater")
 
 local clientFactory = require("schluter.client")
 local constants = require("constants")
+
+--- Whether the license gate lets the account reach Schluter. An OSS build has no gate.
+--- @return boolean
+local function licensed()
+  --#ifdef DRIVERCENTRAL
+  if not drivercentral:licensed() then
+    return false
+  end
+  --#endif
+  return true
+end
 
 local NS = constants.BINDING_NAMESPACE
 local CMD = constants.CMD
@@ -170,7 +178,7 @@ end
 --- and the safety-net poll can overlap) a slow earlier response would otherwise
 --- land last and hand a stale device to the companion.
 local function refreshThermostats()
-  if not client:isAuthenticated() then
+  if not client:isAuthenticated() or not licensed() then
     return
   end
   gRefreshIssued = gRefreshIssued + 1
@@ -227,10 +235,13 @@ local armNotifications
 --- expires our session out from under us.
 --- @type fun(): void
 local login
+--- Forward declaration: the license gate's stop, defined once the write state it clears is.
+--- @type fun(): void
+local stopAccount
 
 armNotifications = function(generation, backoffS)
-  if generation ~= gNotifyGeneration then
-    -- Retired by a newer login. Let this loop die.
+  if generation ~= gNotifyGeneration or not licensed() then
+    -- Retired by a newer login, or stopped by the license gate. Let this loop die.
     return
   end
   if not client:isAuthenticated() then
@@ -354,6 +365,14 @@ login = function(retryBackoffS)
   CancelTimer("SchluterLogin")
   CancelTimer("SchluterLoginRetry")
   gLoginPending = false
+  --#ifdef DRIVERCENTRAL
+  if not drivercentral:licensed() then
+    client:logout()
+    C4:UpdateProperty("Login Status", drivercentral.UNLICENSED_STATUS)
+    C4:UpdateProperty("Driver Status", drivercentral.UNLICENSED_STATUS)
+    return
+  end
+  --#endif
   local email = Properties["Email"]
   local password = Properties["Password"]
   if IsEmpty(email) or IsEmpty(password) then
@@ -429,8 +448,7 @@ end
 
 function OnDriverInit()
   --#ifdef DRIVERCENTRAL
-  require("cloud-client-byte")
-  C4:AllowExecute(false)
+  drivercentral:startClient()
   --#else
   C4:AllowExecute(true)
   --#endif
@@ -473,6 +491,18 @@ function OnDriverLateInit()
   --#endif
 
   gInitialized = true
+  --#ifdef DRIVERCENTRAL
+  drivercentral:startGate(function(isLicensed)
+    if isLicensed then
+      login()
+    else
+      stopAccount()
+    end
+  end)
+  if not licensed() then
+    return
+  end
+  --#endif
   login()
 end
 
@@ -628,6 +658,24 @@ writeThermostat = function(serial, settings)
   end)
 end
 
+--#ifdef DRIVERCENTRAL
+--- The license gate stopped the account: nothing reaches Schluter and the thermostats go offline until a license is back.
+stopAccount = function()
+  -- While unlicensed, login() only stops: the long-poll, every timer and the session, and says why.
+  login()
+  for serial in pairs(gWriteInFlight) do
+    CancelTimer("SchluterWrite_" .. serial)
+    gWriteInFlight[serial] = nil
+  end
+  for serial in pairs(gQueuedWrite) do
+    gQueuedWrite[serial] = nil
+  end
+  for _, binding in pairs(bindings:getDynamicBindings(NS)) do
+    SendToProxy(binding.bindingId, CMD.GO_OFFLINE, {})
+  end
+end
+--#endif
+
 --- A companion pushes mutated settings for us to write to Schluter.
 --- @param idBinding integer
 --- @param _strCommand string
@@ -635,7 +683,7 @@ end
 function RFP.setThermostat(idBinding, _strCommand, tParams)
   log:trace("RFP.setThermostat(%s)", idBinding)
   local serial = serialForBinding(idBinding)
-  if not serial or not client:isAuthenticated() then
+  if not serial or not client:isAuthenticated() or not licensed() then
     return
   end
   local ok, settings = pcall(JSON.decode, JSON, (tParams or {}).JSON or "")
@@ -656,6 +704,10 @@ end
 
 function EC.Refresh_Thermostats()
   log:trace("EC.Refresh_Thermostats()")
+  if not licensed() then
+    log:print("No active license: the Schluter account stays stopped")
+    return
+  end
   refreshThermostats()
 end
 
