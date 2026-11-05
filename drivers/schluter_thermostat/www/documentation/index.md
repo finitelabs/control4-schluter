@@ -13,7 +13,7 @@
 }
 </style>
 
-<img alt="Schluter Thermostat" src="./images/header.png" width="275"/>
+<img alt="Schluter Thermostat" src="./images/header.png" width="500"/>
 
 ______________________________________________________________________
 
