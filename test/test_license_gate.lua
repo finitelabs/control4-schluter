@@ -27,21 +27,26 @@ end
 -- The Schluter cloud, counted: each call is a request that left the controller.
 local calls = { logins = 0, reads = 0, writes = 0, polls = 0 }
 local authed = false
+-- A held call answers only when the test resolves it, as a request still in flight would.
+local hold = {}
 local fake = {}
 function fake.isAuthenticated()
   return authed
 end
 function fake.authenticate()
   calls.logins = calls.logins + 1
+  if hold.login then
+    hold.login = deferred.new()
+    return hold.login
+  end
   authed = true
   return resolved(true)
 end
 function fake.logout()
   authed = false
 end
-function fake.getThermostats()
-  calls.reads = calls.reads + 1
-  return resolved({
+local function thermostats()
+  return {
     {
       SerialNumber = 1182342,
       Room = "Bath",
@@ -50,7 +55,15 @@ function fake.getThermostats()
       Temperature = 3130,
       Online = true,
     },
-  })
+  }
+end
+function fake.getThermostats()
+  calls.reads = calls.reads + 1
+  if hold.read then
+    hold.read = deferred.new()
+    return hold.read
+  end
+  return resolved(thermostats())
 end
 function fake.setThermostat(_, _serial, settings)
   calls.writes = calls.writes + 1
@@ -248,6 +261,38 @@ do
   tick(30)
   fire("SchluterWrite_1182342")
   T.eq("the waiting write never goes out", calls.writes, writes)
+end
+
+T.section("A read still in flight when the account stops brings nothing back online")
+do
+  load({ AC = 1, AS = "License Activated" })
+  hold.read = true
+  fire("SchluterReconcile")
+  local pending = hold.read
+  hold.read = nil
+  cloud.answer = { AC = 0, AS = "Trial Expired" }
+  tick(30)
+  local updates = sent("updateThermostat")
+  pending:resolve(thermostats())
+  T.eq("the thermostat is told nothing new", sent("updateThermostat"), updates)
+  T.eq("Driver Status still says why", Properties["Driver Status"], "No active license")
+end
+
+T.section("A login still in flight when the account stops leaves it logged out")
+do
+  load({ AC = 1, AS = "License Activated" })
+  EC.Reconnect()
+  hold.login = true
+  fire("SchluterLogin")
+  local pending = hold.login
+  hold.login = nil
+  cloud.answer = { AC = 0, AS = "Trial Expired" }
+  tick(30)
+  authed = true
+  pending:resolve(true)
+  T.eq("the session is closed again", authed, false)
+  T.eq("Login Status still says why", Properties["Login Status"], "No active license")
+  T.eq("and no reconcile poll is armed", timers.SchluterReconcile, nil)
 end
 
 T.section("A license back logs the account in again at once")

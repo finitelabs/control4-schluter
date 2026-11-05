@@ -390,6 +390,11 @@ login = function(retryBackoffS)
   SetTimer("SchluterLogin", WRITE_DELAY_MS, function()
     client:authenticate(email, password):next(function()
       gLoginPending = false
+      -- A login sent before the gate stopped the account answers into a stopped account.
+      if not licensed() then
+        client:logout()
+        return
+      end
       gState.sequenceNr = 0
       C4:UpdateProperty("Login Status", "Logged In")
       refreshThermostats()
@@ -663,6 +668,9 @@ end
 stopAccount = function()
   -- While unlicensed, login() only stops: the long-poll, every timer and the session, and says why.
   login()
+  -- A read already sent is stale once it answers, so it brings no thermostat back online.
+  gRefreshIssued = gRefreshIssued + 1
+  gRefreshAccepted = gRefreshIssued
   for serial in pairs(gWriteInFlight) do
     CancelTimer("SchluterWrite_" .. serial)
     gWriteInFlight[serial] = nil
