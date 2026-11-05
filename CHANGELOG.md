@@ -31,6 +31,9 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
   `Diagnostics Snapshot` action to every driver. Cloud Monitoring sends Finite
   Labs an hourly report of the driver's memory use and a report of each error it
   hits; the documentation says what they hold.
+- Added a license check. Five minutes without an active license or trial, the
+  Schluter driver logs out of Schluter, its thermostats go offline and Driver
+  Status reads `No active license`; a license logs it in again at once.
 
 ### Changed
 
