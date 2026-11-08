@@ -591,11 +591,9 @@ function OnDriverLateInit()
   if not CheckMinimumVersion("Driver Status") then
     return
   end
+  -- The router runs each handler in its own xpcall and reports its error, so the rest still run.
   for p, _ in pairs(Properties) do
-    local status, err = pcall(OnPropertyChanged, p)
-    if not status and err then
-      log:error("Error in OnPropertyChanged for property '%s': %s", p, err)
-    end
+    OnPropertyChanged(p)
   end
   gInitialized = true
   applyDisplayScale(displayScale.resolve(PROXY_BINDING))

@@ -28,6 +28,7 @@ local supportCode = require("lib.support-code")
 local diagnostics = require("lib.diagnostics")
 --#endif
 --#ifndef DRIVERCENTRAL
+local driverFilenames = require("lib.driver-filenames")
 local githubUpdater = require("lib.github-updater")
 --#endif
 
@@ -436,12 +437,7 @@ end
 function UpdateDrivers(forceUpdate)
   log:trace("UpdateDrivers(%s)", forceUpdate)
   githubUpdater
-    :updateAll(
-      DRIVER_GITHUB_REPO,
-      require("lib.driver-filenames"),
-      Properties["Update Channel"] == "Prerelease",
-      forceUpdate
-    )
+    :updateAll(DRIVER_GITHUB_REPO, driverFilenames, Properties["Update Channel"] == "Prerelease", forceUpdate)
     :next(function(updatedDrivers)
       if updatedDrivers and #updatedDrivers > 0 then
         log:info("Updated driver(s): %s", table.concat(updatedDrivers, ","))
@@ -478,11 +474,9 @@ function OnDriverLateInit()
     return
   end
 
+  -- The router runs each handler in its own xpcall and reports its error, so the rest still run.
   for p, _ in pairs(Properties) do
-    local ok, err = pcall(OnPropertyChanged, p)
-    if not ok then
-      log:error("OnPropertyChanged('%s') failed: %s", p, tostring(err))
-    end
+    OnPropertyChanged(p)
   end
 
   --#ifndef DRIVERCENTRAL
