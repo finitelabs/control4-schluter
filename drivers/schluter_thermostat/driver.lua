@@ -517,8 +517,6 @@ end
 
 function OPC.Log_Level(propertyValue)
   log:setLogLevel(propertyValue)
-  local ultra = log:getLogLevel() >= 6 and log:isPrintEnabled()
-  DEBUGPRINT, DEBUG_TIMER, DEBUG_RFN, DEBUG_URL, DEBUG_WEBSOCKET = ultra, ultra, ultra, ultra, ultra
 end
 
 function OPC.Log_Mode(propertyValue)

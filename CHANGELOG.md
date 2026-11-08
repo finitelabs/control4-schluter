@@ -37,6 +37,10 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 
 ### Changed
 
+- Changed Log Level in the DriverCentral build to stop at `4 - Debug`:
+  `5 - Trace` and `6 - Ultra` are offered only while a Support Code from Finite
+  Labs support has the Lua tab open, and a driver set to either goes back to
+  `4 - Debug`.
 - Changed Automatic Updates to one setting for the Schluter driver and its
   Schluter Thermostat drivers: changing it on any of them now changes it on all
   of them, so the drivers update together.
