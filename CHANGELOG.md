@@ -26,12 +26,15 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 
 - Added a Support Code property to the Schluter and Schluter Thermostat drivers,
   which lets Finite Labs support open the driver's Lua tab and its Trace and
-  Ultra log levels for an hour
+  Ultra log levels for an hour.
 - Added Cloud Monitoring, Enabled by default, which sends Finite Labs each
   driver's memory use every hour and each error it hits, and a Diagnostics
-  Snapshot action
-- Added one Automatic Updates setting for the Schluter driver and its thermostat
-  drivers, so the drivers update together
+  Snapshot action.
+
+### Changed
+
+- Changed Automatic Updates to one setting for every Schluter driver in the
+  project, so the drivers update together.
 
 <!-- #endif -->
 
