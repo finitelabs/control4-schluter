@@ -24,26 +24,14 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 
 ### Added
 
-- Added a `Support Code` property to the Schluter and Schluter Thermostat
-  drivers. A code from Finite Labs support opens the driver's Lua tab in
-  Composer for an hour; leave it blank otherwise.
-- Added a `Cloud Monitoring` property, Enabled by default, and a
-  `Diagnostics Snapshot` action to every driver. Cloud Monitoring sends Finite
-  Labs an hourly report of the driver's memory use and a report of each error it
-  hits; the documentation says what they hold.
-- Added a license check. Five minutes without an active license or trial, the
-  Schluter driver logs out of Schluter, its thermostats go offline and Driver
-  Status reads `No active license`; a license logs it in again at once.
-
-### Changed
-
-- Changed Log Level in the DriverCentral build to stop at `4 - Debug`:
-  `5 - Trace` and `6 - Ultra` are offered only while a Support Code from Finite
-  Labs support has the Lua tab open, and a driver set to either goes back to
-  `4 - Debug`.
-- Changed Automatic Updates to one setting for the Schluter driver and its
-  Schluter Thermostat drivers: changing it on any of them now changes it on all
-  of them, so the drivers update together.
+- Added a Support Code property to the Schluter and Schluter Thermostat drivers,
+  which lets Finite Labs support open the driver's Lua tab and its Trace and
+  Ultra log levels for an hour
+- Added Cloud Monitoring, Enabled by default, which sends Finite Labs each
+  driver's memory use every hour and each error it hits, and a Diagnostics
+  Snapshot action
+- Added one Automatic Updates setting for the Schluter driver and its thermostat
+  drivers, so the drivers update together
 
 <!-- #endif -->
 
@@ -53,23 +41,19 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 
 - Fixed the driver reporting "Error retrieving thermostats" when a periodic
   account refresh timed out, even though the thermostat was still connected and
-  reporting live. It now keeps the connected status as long as a thermostat is
-  known, and only shows the error before any have been discovered.
-- Fixed the thermostat always using Fahrenheit. It never read the temperature
-  scale from Control4, so a Celsius project got Fahrenheit setpoint steps and a
-  schedule shown in the wrong unit. The driver now follows the scale the
-  thermostat is set to, falling back to the project's setting, and picks up a
-  change made in Navigator straight away.
+  reporting live.
+- Fixed the thermostat always using Fahrenheit. It now follows the scale the
+  thermostat is set to, or the project's, and picks up a change made in
+  Navigator at once.
 - Fixed the thermostat telling Control4 its scale could not be changed while
   still acting on the change, so the Celsius and Fahrenheit choice is now
   offered.
 - Fixed the thermostat showing a temperature or setpoint of "nil" when the cloud
   sent an update that did not include one. The last known reading is kept until
   a real one arrives.
-- Fixed the whole weekly schedule disappearing from the Control4 schedule editor
-  when the thermostat reported one entry without a usable temperature. The other
-  entries are now shown, and editing an entry whose stored temperature cannot be
-  read no longer fails partway through.
+- Fixed the whole weekly schedule disappearing from the Control4 schedule
+  editor, or an edit failing partway through, when one entry had no usable
+  temperature.
 - Fixed the setpoint up and down buttons doing nothing but logging an error
   after an update that carried no setpoint.
 - Fixed turning the thermostat off or back to heat from the Control4 app doing
@@ -96,10 +80,10 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 - Control for Schluter DITRA-HEAT WiFi floor-heating thermostats. An account
   driver connects to your Schluter account and adds a thermostat companion
   driver for each thermostat it finds.
-- Native Control4 thermostat integration (ThermostatV2): floor temperature, heat
-  setpoint, and Heat/Off mode.
+- Native Control4 thermostat control of floor temperature, heat setpoint and
+  Heat or Off mode.
 - The full weekly heating schedule, read and edited from the standard Control4
   scheduling interface.
-- Hold options (Until Next, Permanent).
+- Until Next and Permanent hold options.
 - Floor temperature exposed as a temperature-value connection for other drivers.
 - Automatic driver updates via GitHub or DriverCentral.
