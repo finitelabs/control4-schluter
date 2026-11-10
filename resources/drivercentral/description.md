@@ -2,6 +2,9 @@
 
 ## Overview
 
+*This software is neither affiliated with nor endorsed by either Control4 or
+Schluter-Systems.*
+
 Control Schluter DITRA-HEAT-E-WiFi floor-heating thermostats from Control4. Each
 thermostat is a native Control4 thermostat with its floor temperature, setpoint,
 mode and full weekly heating schedule, so heated floors sit beside the rest of
@@ -21,7 +24,7 @@ app show in Control4 as they happen.
   driver
 - Floor temperature as a connection for other drivers
 
-## Included Drivers
+## Included drivers
 
 ### Schluter
 
@@ -44,5 +47,4 @@ thermostat and bind it to the account driver.
 
 ## Compatibility
 
-- Schluter DITRA-HEAT-E-RS1
-- Schluter DITRA-HEAT-E-RT1
+Works with the Schluter DITRA-HEAT-E-RS1 and DITRA-HEAT-E-RT1 thermostats.
