@@ -14,7 +14,8 @@ DITRA-HEAT WiFi account.
 - The weekly heating schedule, read and edited from the standard Control4
   scheduling screen
 - Until Next and Permanent hold
-- A thermostat driver added for each thermostat on the account
+- Every thermostat on the account found, ready to bind to a Schluter Thermostat
+  driver
 - Floor temperature as a connection for other drivers
 - Follows the project's temperature scale
 
