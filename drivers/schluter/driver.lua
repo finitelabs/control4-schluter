@@ -90,6 +90,13 @@ local gInitialized = false
 --- the connection contention the grace period exists to avoid.
 local gLoginPending = false
 
+--- Whether the current session has answered a read. One the server drops before it has is not signed in again at
+--- once: a server that refuses every new session would otherwise get a sign-in every few seconds.
+local gSessionWorked = false
+--- The wait before signing in again after such a session, doubling up to LOGIN_RETRY_MAX_S; nil once one has worked.
+--- @type number|nil
+local gRefusedBackoffS = nil
+
 --- All schluter account instances on this controller, sorted by device id. Used
 --- for leader election (lowest id is the leader that runs updates).
 --- @return integer[]
@@ -193,6 +200,7 @@ local function refreshThermostats()
       return
     end
     gRefreshAccepted = refreshId
+    gSessionWorked, gRefusedBackoffS = true, nil
     for _, device in ipairs(list) do
       ingestThermostat(device)
     end
@@ -213,6 +221,12 @@ local function refreshThermostats()
 end
 
 -- ─── Real-time notification long-poll ──────────────────────────────────────
+
+--- Backoff after a login that failed for a retryable reason, and the ceiling it
+--- grows to. Deliberately slower than the notification ladder: a login is a
+--- credentialed POST, not a poll, so there is no reason to hammer it.
+local LOGIN_RETRY_S = 5
+local LOGIN_RETRY_MAX_S = 300
 
 --- Floor between polls. The server normally holds the request open for minutes,
 --- but it answers immediately when it has a backlog — or when something is wrong
@@ -248,6 +262,16 @@ armNotifications = function(generation, backoffS)
   if not client:isAuthenticated() then
     -- The session expired (a 401 clears it in the client). Log in again; a
     -- successful login restarts the loop on a fresh generation.
+    if not gSessionWorked then
+      local delay = gRefusedBackoffS or LOGIN_RETRY_S
+      gRefusedBackoffS = math.min(delay * 2, LOGIN_RETRY_MAX_S)
+      log:warn("Schluter refused a new session; signing in again in %ds", delay)
+      C4:UpdateProperty("Driver Status", string.format("Not connected; retrying in %ds", delay))
+      SetTimer("SchluterLoginRetry", delay * ONE_SECOND, function()
+        login()
+      end)
+      return
+    end
     log:info("No valid session; re-authenticating")
     login()
     return
@@ -257,6 +281,7 @@ armNotifications = function(generation, backoffS)
     if generation ~= gNotifyGeneration then
       return
     end
+    gSessionWorked, gRefusedBackoffS = true, nil
     if obj and obj.SequenceNr then
       gState.sequenceNr = tonumber(obj.SequenceNr) + 1
     end
@@ -341,12 +366,6 @@ local WRITE_READBACK_S = 5
 --- behind the notification connection rather than going out cleanly.
 local SLOW_WRITE_S = 5
 
---- Backoff after a login that failed for a retryable reason, and the ceiling it
---- grows to. Deliberately slower than the notification ladder: a login is a
---- credentialed POST, not a poll, so there is no reason to hammer it.
-local LOGIN_RETRY_S = 5
-local LOGIN_RETRY_MAX_S = 300
-
 -- ─── Login ─────────────────────────────────────────────────────────────────
 
 --- @param retryBackoffS number|nil Delay before the next attempt if this one
@@ -397,6 +416,7 @@ login = function(retryBackoffS)
         return
       end
       gState.sequenceNr = 0
+      gSessionWorked = false
       C4:UpdateProperty("Login Status", "Logged In")
       refreshThermostats()
       restartNotifications()
