@@ -165,4 +165,18 @@ T.eq("the sign-in is on its way", timers.SchluterLogin ~= nil, true)
 fire("SchluterLogin")
 T.eq("one sign-in", signIns, 1)
 
+T.section("after a session that worked, a refused one waits from the bottom of the ladder")
+-- As on prod: the session worked, then Schluter starts refusing.
+refusing = true
+authed = false
+poll:reject("HTTP 401")
+fire("SchluterNotify")
+fire("SchluterLogin")
+T.eq("the refused session is not signed in again at once", timers.SchluterLogin, nil)
+T.eq(
+  "it waits five seconds, not the five minutes the last refusal reached",
+  timers.SchluterLoginRetry and timers.SchluterLoginRetry.delay,
+  5000
+)
+
 T.finish()
