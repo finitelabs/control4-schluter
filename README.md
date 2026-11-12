@@ -250,6 +250,13 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 - Removed
 -->
 
+## Unreleased
+
+### Fixed
+
+- Fixed the Schluter account signing in again every few seconds while Schluter
+  refuses its new sessions.
+
 ## v20261111 - 2026-11-11
 
 ### Fixed
