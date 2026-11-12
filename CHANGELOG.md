@@ -18,9 +18,9 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 - Removed
 -->
 
-<!-- #ifdef DRIVERCENTRAL -->
-
 ## Unreleased
+
+<!-- #ifdef DRIVERCENTRAL -->
 
 ### Added
 
@@ -30,6 +30,15 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 - Added Cloud Monitoring, Enabled by default, which sends Finite Labs each
   driver's memory use every hour and each error it hits, and a Diagnostics
   Snapshot action.
+
+<!-- #endif -->
+
+### Fixed
+
+- Fixed the Schluter account's session ID showing in plain text in the Trace
+  log.
+
+<!-- #ifdef DRIVERCENTRAL -->
 
 ### Changed
 

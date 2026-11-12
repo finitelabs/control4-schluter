@@ -250,6 +250,13 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 - Removed
 -->
 
+## Unreleased
+
+### Fixed
+
+- Fixed the Schluter account's session ID showing in plain text in the Trace
+  log.
+
 ## v20261025 - 2026-10-25
 
 ### Fixed
