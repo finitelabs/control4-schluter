@@ -18,6 +18,18 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 - Removed
 -->
 
+<!-- #ifdef DRIVERCENTRAL -->
+
+## v20261112 - 2026-11-12
+
+### Added
+
+- Added the Schluter and Schluter Thermostat drivers to DriverCentral.
+
+<!-- #endif -->
+
+<!-- #ifndef DRIVERCENTRAL -->
+
 ## v20261112 - 2026-11-12
 
 ### Fixed
@@ -27,32 +39,10 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 
 ## v20261111 - 2026-11-11
 
-<!-- #ifdef DRIVERCENTRAL -->
-
-### Added
-
-- Added a Support Code property to the Schluter and Schluter Thermostat drivers,
-  which lets Finite Labs support open the driver's Lua tab and its Trace and
-  Ultra log levels for an hour.
-- Added Cloud Monitoring, Enabled by default, which sends Finite Labs each
-  driver's memory use every hour and each error it hits, and a Diagnostics
-  Snapshot action.
-
-<!-- #endif -->
-
 ### Fixed
 
 - Fixed the Schluter account's session ID showing in plain text in the Trace
   log.
-
-<!-- #ifdef DRIVERCENTRAL -->
-
-### Changed
-
-- Changed Automatic Updates to one setting for every Schluter driver in the
-  project, so the drivers update together.
-
-<!-- #endif -->
 
 ## v20261025 - 2026-10-25
 
@@ -82,14 +72,9 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 - Fixed a setpoint changed during a temporary or permanent hold jumping back to
   the old value in the Control4 app, and not being sent again when Schluter
   missed it.
-
-<!-- #ifndef DRIVERCENTRAL -->
-
 - Fixed an automatic update sometimes leaving companion drivers on the previous
   version until the next update, which could make them stop responding in the
   meantime.
-
-<!-- #endif -->
 
 ## v20260816 - 2026-08-16
 
@@ -106,3 +91,5 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 - Until Next and Permanent hold options.
 - Floor temperature exposed as a temperature-value connection for other drivers.
 - Automatic driver updates via GitHub or DriverCentral.
+
+<!-- #endif -->
