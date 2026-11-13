@@ -250,9 +250,6 @@ local armNotifications
 --- expires our session out from under us.
 --- @type fun(): void
 local login
---- Forward declaration: the license gate's stop, defined once the write state it clears is.
---- @type fun(): void
-local stopAccount
 
 armNotifications = function(generation, backoffS)
   if generation ~= gNotifyGeneration or not licensed() then
@@ -451,6 +448,189 @@ login = function(retryBackoffS)
   end)
 end
 
+-- ─── Messages from a companion (RFP dispatch) ──────────────────────────────
+
+--- Serial numbers with a POST in flight, and the most recent settings that
+--- arrived while it was. The companion re-POSTs its intended state every 12s
+--- until the cloud confirms, so without coalescing a single user action stacks
+--- several concurrent writes against a host that is already holding a long-poll
+--- open — which is how requests started timing out.
+--- @type table<string, boolean>
+local gWriteInFlight = {}
+--- @type table<string, table>
+local gQueuedWrite = {}
+
+--- @param serial string
+--- @param settings table
+local function writeThermostat(serial, settings)
+  gWriteInFlight[serial] = true
+  -- Take the connection back from the long-poll before POSTing (see
+  -- suspendNotifications), otherwise this write is likely to time out.
+  suspendNotifications()
+  --- Release the in-flight slot and send whatever arrived while we were busy,
+  --- resuming the notification stream once nothing is left to write.
+  local function done()
+    gWriteInFlight[serial] = nil
+    local queued = gQueuedWrite[serial]
+    if queued then
+      gQueuedWrite[serial] = nil
+      -- Re-check the session. RFP.setThermostat gated on it before the POST
+      -- this is completing, and a write held open is exactly the window where
+      -- the session gets rejected, so the replay must not inherit that stale
+      -- decision. Dropping the settings is safe: every push carries the full
+      -- object, so the companion re-sends on its next retry once login() has
+      -- re-established the session.
+      if client:isAuthenticated() then
+        writeThermostat(serial, queued)
+        return
+      end
+      log:warn("Dropped a queued write for %s: session was lost while a write was in flight", serial)
+    end
+    -- Not while a login is armed or in flight: resuming the poll here would
+    -- hand authenticate() the held connection back, which is exactly what
+    -- login()'s grace period is trying to keep clear. The login's own success
+    -- handler restarts the stream.
+    if next(gWriteInFlight) == nil and not gLoginPending then
+      restartNotifications()
+    end
+  end
+  -- Give the cancelled long-poll a moment to actually release its connection
+  -- before we POST; aborting a transfer does not necessarily free it inline.
+  SetTimer("SchluterWrite_" .. serial, WRITE_DELAY_MS, function()
+    local t0 = os.time()
+    client:setThermostat(serial, settings):next(function()
+      -- Take the next slot in the refresh sequence so any /api/thermostats read
+      -- that was already in flight when this write landed is discarded instead of
+      -- handing the companion the pre-write state.
+      gRefreshIssued = gRefreshIssued + 1
+      gRefreshAccepted = gRefreshIssued
+      -- Neither stored nor handed back: Schluter answers a write with only
+      -- {"Success":true}, so the result is usually the settings just sent, and a
+      -- companion handed them (now, or on a bind) would read them as the cloud
+      -- confirming its write before it has. The read below, or the next
+      -- notification, carries what Schluter stored.
+      SetTimer("SchluterReadback", WRITE_READBACK_S * ONE_SECOND, refreshThermostats)
+      local elapsed = os.time() - t0
+      if elapsed >= SLOW_WRITE_S then
+        log:warn("Write to %s took %ds (long-poll connection contention)", serial, elapsed)
+      end
+      done()
+    end, function(err)
+      log:warn("setThermostat failed for %s after %ds: %s", serial, os.time() - t0, err)
+      done()
+    end)
+  end)
+end
+
+--#ifdef DRIVERCENTRAL
+--- The license gate stopped the account: nothing reaches Schluter and the thermostats go offline until a license is back.
+local function stopAccount()
+  -- While unlicensed, login() only stops: the long-poll, every timer and the session, and says why.
+  login()
+  -- A read already sent is stale once it answers, so it brings no thermostat back online.
+  gRefreshIssued = gRefreshIssued + 1
+  gRefreshAccepted = gRefreshIssued
+  for serial in pairs(gWriteInFlight) do
+    CancelTimer("SchluterWrite_" .. serial)
+    gWriteInFlight[serial] = nil
+  end
+  for serial in pairs(gQueuedWrite) do
+    gQueuedWrite[serial] = nil
+  end
+  for _, binding in pairs(bindings:getDynamicBindings(NS)) do
+    SendToProxy(binding.bindingId, CMD.GO_OFFLINE, {})
+  end
+end
+--#endif
+
+--- A companion pushes mutated settings for us to write to Schluter.
+--- @param idBinding integer
+--- @param _strCommand string
+--- @param tParams table
+function RFP.setThermostat(idBinding, _strCommand, tParams)
+  log:trace("RFP.setThermostat(%s)", idBinding)
+  local serial = serialForBinding(idBinding)
+  if not serial or not client:isAuthenticated() or not licensed() then
+    return
+  end
+  local ok, settings = pcall(JSON.decode, JSON, (tParams or {}).JSON or "")
+  if not ok or type(settings) ~= "table" then
+    return
+  end
+  if gWriteInFlight[serial] then
+    -- Coalesce: keep only the newest intent and send it when the current POST
+    -- finishes. Nothing is lost, because each push carries the full object.
+    log:trace("write already in flight for %s; coalescing", serial)
+    gQueuedWrite[serial] = settings
+    return
+  end
+  writeThermostat(serial, settings)
+end
+
+-- ─── Actions (EC dispatch) ─────────────────────────────────────────────────
+
+function EC.Refresh_Thermostats()
+  log:trace("EC.Refresh_Thermostats()")
+  if not licensed() then
+    log:print("No active license: the Schluter account stays stopped")
+    return
+  end
+  refreshThermostats()
+end
+
+--- Drop the current session and log in again. Unlike Reset Driver, this leaves
+--- the dynamic companion bindings (and cached devices) untouched.
+function EC.Reconnect()
+  log:trace("EC.Reconnect()")
+  client:logout()
+  login()
+end
+
+function EC.Reset_Driver(tParams)
+  log:trace("EC.Reset_Driver()")
+  if (tParams or {})["Are You Sure?"] == "Yes" then
+    bindings:reset()
+    gState.devices = {}
+    client:logout()
+    C4:UpdateProperty("Login Status", "")
+    --#ifdef DRIVERCENTRAL
+    UpdateProperty("Cloud Monitoring", "Enabled", true)
+    --#endif
+    login()
+  end
+end
+
+--#ifndef DRIVERCENTRAL
+function EC.Update_Drivers()
+  log:trace("EC.Update_Drivers()")
+  UpdateDrivers(true)
+end
+--#endif
+
+--- An update setting changed on another item.
+function EC.SET_UPDATE_SETTING(params)
+  log:trace("EC.SET_UPDATE_SETTING(%s)", params)
+  updateSettings:take(params)
+end
+
+--#ifdef DRIVERCENTRAL
+--- Not logged: the value is the code.
+function OPC.Support_Code(propertyValue)
+  supportCode:enter(propertyValue)
+end
+
+--- Turns Cloud Monitoring on or off.
+--- @param propertyValue string
+function OPC.Cloud_Monitoring(propertyValue)
+  diagnostics:setEnabled(propertyValue == "Enabled")
+end
+
+--- Prints a diagnostics report, and sends it while Cloud Monitoring is on.
+function EC.DiagnosticsSnapshot()
+  diagnostics:dumpSnapshot()
+end
+--#endif
+
 --#ifndef DRIVERCENTRAL
 --- Update the driver(s) from the GitHub repository.
 --- @param forceUpdate? boolean Force the update even if already up to date.
@@ -600,189 +780,5 @@ function OPC.Update_Channel(propertyValue)
     return
   end
   updateSettings:share("Update Channel", propertyValue)
-end
---#endif
-
--- ─── Messages from a companion (RFP dispatch) ──────────────────────────────
-
---- Serial numbers with a POST in flight, and the most recent settings that
---- arrived while it was. The companion re-POSTs its intended state every 12s
---- until the cloud confirms, so without coalescing a single user action stacks
---- several concurrent writes against a host that is already holding a long-poll
---- open — which is how requests started timing out.
---- @type table<string, boolean>
-local gWriteInFlight = {}
---- @type table<string, table>
-local gQueuedWrite = {}
-
---- @type fun(serial: string, settings: table): void
-local writeThermostat
-
-writeThermostat = function(serial, settings)
-  gWriteInFlight[serial] = true
-  -- Take the connection back from the long-poll before POSTing (see
-  -- suspendNotifications), otherwise this write is likely to time out.
-  suspendNotifications()
-  --- Release the in-flight slot and send whatever arrived while we were busy,
-  --- resuming the notification stream once nothing is left to write.
-  local function done()
-    gWriteInFlight[serial] = nil
-    local queued = gQueuedWrite[serial]
-    if queued then
-      gQueuedWrite[serial] = nil
-      -- Re-check the session. RFP.setThermostat gated on it before the POST
-      -- this is completing, and a write held open is exactly the window where
-      -- the session gets rejected, so the replay must not inherit that stale
-      -- decision. Dropping the settings is safe: every push carries the full
-      -- object, so the companion re-sends on its next retry once login() has
-      -- re-established the session.
-      if client:isAuthenticated() then
-        writeThermostat(serial, queued)
-        return
-      end
-      log:warn("Dropped a queued write for %s: session was lost while a write was in flight", serial)
-    end
-    -- Not while a login is armed or in flight: resuming the poll here would
-    -- hand authenticate() the held connection back, which is exactly what
-    -- login()'s grace period is trying to keep clear. The login's own success
-    -- handler restarts the stream.
-    if next(gWriteInFlight) == nil and not gLoginPending then
-      restartNotifications()
-    end
-  end
-  -- Give the cancelled long-poll a moment to actually release its connection
-  -- before we POST; aborting a transfer does not necessarily free it inline.
-  SetTimer("SchluterWrite_" .. serial, WRITE_DELAY_MS, function()
-    local t0 = os.time()
-    client:setThermostat(serial, settings):next(function()
-      -- Take the next slot in the refresh sequence so any /api/thermostats read
-      -- that was already in flight when this write landed is discarded instead of
-      -- handing the companion the pre-write state.
-      gRefreshIssued = gRefreshIssued + 1
-      gRefreshAccepted = gRefreshIssued
-      -- Neither stored nor handed back: Schluter answers a write with only
-      -- {"Success":true}, so the result is usually the settings just sent, and a
-      -- companion handed them (now, or on a bind) would read them as the cloud
-      -- confirming its write before it has. The read below, or the next
-      -- notification, carries what Schluter stored.
-      SetTimer("SchluterReadback", WRITE_READBACK_S * ONE_SECOND, refreshThermostats)
-      local elapsed = os.time() - t0
-      if elapsed >= SLOW_WRITE_S then
-        log:warn("Write to %s took %ds (long-poll connection contention)", serial, elapsed)
-      end
-      done()
-    end, function(err)
-      log:warn("setThermostat failed for %s after %ds: %s", serial, os.time() - t0, err)
-      done()
-    end)
-  end)
-end
-
---#ifdef DRIVERCENTRAL
---- The license gate stopped the account: nothing reaches Schluter and the thermostats go offline until a license is back.
-stopAccount = function()
-  -- While unlicensed, login() only stops: the long-poll, every timer and the session, and says why.
-  login()
-  -- A read already sent is stale once it answers, so it brings no thermostat back online.
-  gRefreshIssued = gRefreshIssued + 1
-  gRefreshAccepted = gRefreshIssued
-  for serial in pairs(gWriteInFlight) do
-    CancelTimer("SchluterWrite_" .. serial)
-    gWriteInFlight[serial] = nil
-  end
-  for serial in pairs(gQueuedWrite) do
-    gQueuedWrite[serial] = nil
-  end
-  for _, binding in pairs(bindings:getDynamicBindings(NS)) do
-    SendToProxy(binding.bindingId, CMD.GO_OFFLINE, {})
-  end
-end
---#endif
-
---- A companion pushes mutated settings for us to write to Schluter.
---- @param idBinding integer
---- @param _strCommand string
---- @param tParams table
-function RFP.setThermostat(idBinding, _strCommand, tParams)
-  log:trace("RFP.setThermostat(%s)", idBinding)
-  local serial = serialForBinding(idBinding)
-  if not serial or not client:isAuthenticated() or not licensed() then
-    return
-  end
-  local ok, settings = pcall(JSON.decode, JSON, (tParams or {}).JSON or "")
-  if not ok or type(settings) ~= "table" then
-    return
-  end
-  if gWriteInFlight[serial] then
-    -- Coalesce: keep only the newest intent and send it when the current POST
-    -- finishes. Nothing is lost, because each push carries the full object.
-    log:trace("write already in flight for %s; coalescing", serial)
-    gQueuedWrite[serial] = settings
-    return
-  end
-  writeThermostat(serial, settings)
-end
-
--- ─── Actions (EC dispatch) ─────────────────────────────────────────────────
-
-function EC.Refresh_Thermostats()
-  log:trace("EC.Refresh_Thermostats()")
-  if not licensed() then
-    log:print("No active license: the Schluter account stays stopped")
-    return
-  end
-  refreshThermostats()
-end
-
---- Drop the current session and log in again. Unlike Reset Driver, this leaves
---- the dynamic companion bindings (and cached devices) untouched.
-function EC.Reconnect()
-  log:trace("EC.Reconnect()")
-  client:logout()
-  login()
-end
-
-function EC.Reset_Driver(tParams)
-  log:trace("EC.Reset_Driver()")
-  if (tParams or {})["Are You Sure?"] == "Yes" then
-    bindings:reset()
-    gState.devices = {}
-    client:logout()
-    C4:UpdateProperty("Login Status", "")
-    --#ifdef DRIVERCENTRAL
-    UpdateProperty("Cloud Monitoring", "Enabled", true)
-    --#endif
-    login()
-  end
-end
-
---#ifndef DRIVERCENTRAL
-function EC.Update_Drivers()
-  log:trace("EC.Update_Drivers()")
-  UpdateDrivers(true)
-end
---#endif
-
---- An update setting changed on another item.
-function EC.SET_UPDATE_SETTING(params)
-  log:trace("EC.SET_UPDATE_SETTING(%s)", params)
-  updateSettings:take(params)
-end
-
---#ifdef DRIVERCENTRAL
---- Not logged: the value is the code.
-function OPC.Support_Code(propertyValue)
-  supportCode:enter(propertyValue)
-end
-
---- Turns Cloud Monitoring on or off.
---- @param propertyValue string
-function OPC.Cloud_Monitoring(propertyValue)
-  diagnostics:setEnabled(propertyValue == "Enabled")
-end
-
---- Prints a diagnostics report, and sends it while Cloud Monitoring is on.
-function EC.DiagnosticsSnapshot()
-  diagnostics:dumpSnapshot()
 end
 --#endif
