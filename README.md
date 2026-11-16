@@ -24,16 +24,11 @@ driver talks to the same REST API the Schluter DITRA-HEAT WiFi app uses.
 <div style="font-size: small">
 
 - [System Requirements](#system-requirements)
-
 - [Included Drivers](#included-drivers)
-
   - [Schluter](#schluter)
   - [Schluter Thermostat](#schluter-thermostat)
-
 - [Compatibility](#compatibility)
-
 - [Installer Setup](#installer-setup)
-
   - [Driver Installation](#driver-installation)
   - [Driver Setup](#driver-setup)
     - [Driver Properties](#driver-properties)
@@ -42,9 +37,7 @@ driver talks to the same REST API the Schluter DITRA-HEAT WiFi app uses.
       - [Driver Settings](#driver-settings)
     - [Driver Actions](#driver-actions)
   - [Programming Reference](#programming-reference)
-
 - [Support](#support)
-
 - [Changelog](#changelog)
 
 </div>
