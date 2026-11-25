@@ -80,16 +80,16 @@ Template for a new release entry (copy below the heading, fill in, uncomment):
 
 ### Added
 
-- Initial release.
-- Control for Schluter DITRA-HEAT WiFi floor-heating thermostats. An account
-  driver connects to your Schluter account and adds a thermostat companion
-  driver for each thermostat it finds.
-- Native Control4 thermostat control of floor temperature, heat setpoint and
-  Heat or Off mode.
-- The full weekly heating schedule, read and edited from the standard Control4
-  scheduling interface.
-- Until Next and Permanent hold options.
-- Floor temperature exposed as a temperature-value connection for other drivers.
-- Automatic driver updates via GitHub or DriverCentral.
+- Added the Schluter and Schluter Thermostat drivers.
+- Added control for Schluter DITRA-HEAT WiFi floor-heating thermostats. An
+  account driver connects to your Schluter account and adds a thermostat
+  companion driver for each thermostat it finds.
+- Added native Control4 thermostat control of floor temperature, heat setpoint
+  and Heat or Off mode.
+- Added the full weekly heating schedule, read and edited from the standard
+  Control4 scheduling interface.
+- Added Until Next and Permanent hold options.
+- Added floor temperature as a temperature-value connection for other drivers.
+- Added automatic driver updates via GitHub or DriverCentral.
 
 <!-- #endif -->
